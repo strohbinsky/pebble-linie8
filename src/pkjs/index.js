@@ -50,8 +50,12 @@ function linienKurz(name) {          // Anzeige auf der Uhr: höchstens 4 Zeiche
   return s.replace(/[^A-Z0-9]/g, '').substring(0, 4);
 }
 
-// Steig der Abfahrt (z. B. "B" am Tränkweg), höchstens 3 Zeichen; leer, wenn die Haltestelle keine Steige hat
-function steigText(s) { return String(s || '').replace(/^(Steig|Gleis|Bstg\.?)\s*/i, '').trim().substring(0, 3); }
+// Steig der Abfahrt (z. B. "B" am Tränkweg), höchstens 3 Zeichen; leer, wenn die Haltestelle keine Steige hat.
+// Bei mehreren Wörtern zählt das letzte: RMV meldet am Flughafen "Regio 3" (Regionalbahnhof, Gleis 3) -> "3".
+function steigText(s) {
+  var teile = String(s || '').trim().split(/\s+/);
+  return teile[teile.length - 1].substring(0, 3);
+}
 
 function holen(von, nach, linien, fertig) {
   var url = PLAN +
