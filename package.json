@@ -1,0 +1,64 @@
+{
+  "name": "linie8",
+  "author": "Seb & Claude",
+  "version": "3.2.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "Linie 8",
+    "uuid": "445f2c90-333f-4127-8f7a-8796121e6a69",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "emery"
+    ],
+    "watchapp": {
+      "watchface": false
+    },
+    "messageKeys": [
+      "REQUEST",
+      "STATUS",
+      "STAND",
+      "SEITE",
+      "ANZAHL",
+      "QUELLE",
+      "HIN[3]",
+      "RUECK[3]",
+      "HIN_L[3]",
+      "RUECK_L[3]",
+      "HIN_D[3]",
+      "RUECK_D[3]",
+      "NAME_A[8]",
+      "NAME_B[8]",
+      "AKTION",
+      "WAHL",
+      "L_TITEL",
+      "L_ANZAHL",
+      "L_AB",
+      "L_TEXT[10]",
+      "L_LADE",
+      "LAYOUT",
+      "KLAR_A[8]",
+      "KLAR_B[8]",
+      "HIN_S[3]",
+      "RUECK_S[3]"
+    ],
+    "resources": {
+      "media": [
+        {
+          "type": "bitmap",
+          "name": "SYMBOL",
+          "file": "images/symbol_acht.png",
+          "menuIcon": true
+        }
+      ]
+    },
+    "capabilities": [
+      "configurable",
+      "location"
+    ]
+  }
+}

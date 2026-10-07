@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linie 8</title>
+<style>
+  body { margin: 0; padding: 16px 16px 40px; background: #111; color: #eee; font: 16px/1.4 -apple-system, Roboto, sans-serif; }
+  h1 { font-size: 20px; color: #FFAA00; margin: 0 0 4px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #999; margin: 22px 0 8px; }
+  .klein { font-size: 13px; color: #999; }
+  .hinweis { font-size: 14px; color: #FFAA00; margin: 8px 0; }
+  .fehler { font-size: 14px; color: #f66; margin: 8px 0; }
+  input[type=text] { width: 100%; box-sizing: border-box; padding: 12px; font-size: 17px; border: 1px solid #444; border-radius: 8px; background: #222; color: #fff; }
+  button { padding: 11px 15px; font-size: 15px; border: 0; border-radius: 8px; background: #333; color: #fff; margin: 8px 6px 0 0; }
+  button.haupt { background: #FFAA00; color: #000; font-weight: bold; }
+  button.klein { padding: 7px 10px; font-size: 13px; color: #ddd; }
+  button:disabled { opacity: .35; }
+  ul { list-style: none; padding: 0; margin: 6px 0 0; }
+  li { padding: 11px 10px; border-bottom: 1px solid #2a2a2a; }
+  li.wahl { background: #3a2a00; }
+  .karte { background: #1c1c1c; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+  .karte b { color: #FFAA00; }
+  .marke { display: inline-block; background: #333; color: #FFAA00; border-radius: 4px; padding: 0 5px; margin: 0 3px 3px 0; font-size: 13px; font-weight: bold; }
+  .gewaehlt { background: #1c1c1c; border-radius: 8px; padding: 10px 12px; }
+  .gewaehlt b { color: #FFAA00; }
+  label.zeile { display: block; padding: 9px 0; border-bottom: 1px solid #2a2a2a; }
+  label.zeile input { transform: scale(1.3); margin-right: 10px; }
+  canvas { display: block; margin: 8px 0 2px; background: #000; border-radius: 4px; max-width: 100%; }
+  .fortschritt { height: 6px; background: #333; border-radius: 3px; overflow: hidden; margin: 8px 0; }
+  .fortschritt div { height: 100%; background: #FFAA00; width: 0; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/*LOGIK*/
+var ZUSTAND = /*ZUSTAND*/null;   // wird vom Handy-Skript beim Öffnen eingesetzt
+var API = 'https://api.transitous.org/api/';
+var MAXS = 8, COLS = 66;
+var SCHRIFT = (ZUSTAND && ZUSTAND.schrift) || {};
+var L = Logik(holen, SCHRIFT);    // gemeinsame Logik mit dem Uhr-Menü (src/pkjs/logik.js)
+var sortDe = L.sortDe, entfernung = L.entfernung, ledText = L.ledText, breite = L.breite, stadtVon = L.stadtVon,
+    kurzname = L.kurzname, erreichbar = L.erreichbar, direkt = L.direkt;
+
+var strecken = (ZUSTAND && ZUSTAND.strecken) ? ZUSTAND.strecken.slice() : [];
+var ansicht = 'liste';             // 'liste' oder 'editor'
+var e = null;                      // Entwurf der Strecke im Editor
+var rmvKey = (ZUSTAND && ZUSTAND.rmvKey) || '';
+var rmvTest = '';
+var layout = (ZUSTAND && ZUSTAND.layout) === 'klar' ? 'klar' : 'led';   // Ansicht auf der Uhr
+
+// ---------- Hilfsfunktionen ----------
+function $(id) { return document.getElementById(id); }
+function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+function holen(pfad, fertig) {
+  var x = new XMLHttpRequest();
+  x.open('GET', API + pfad, true);
+  x.onload = function () {
+    if (x.status !== 200) return fertig('HTTP ' + x.status);
+    try { fertig(null, JSON.parse(x.responseText)); } catch (err) { fertig('Antwort unlesbar'); }
+  };
+  x.onerror = function () { fertig('kein Netz'); };
+  x.send();
+}
+
+// ---------- LED-Vorschau (Breite und Kurzname stehen in logik.js) ----------
+var lauf = 0;                      // Lauftext-Versatz der Vorschau, wie auf der Uhr
+function vorschau(canvas, text) {
+  var P = 6, c = canvas.getContext('2d');
+  canvas.width = COLS * P; canvas.height = 7 * P;
+  c.fillStyle = '#000'; c.fillRect(0, 0, canvas.width, canvas.height);
+  var an = {}, w = breite(text), periode = w + 16;
+  function setzen(x) {
+    for (var i = 0; i < text.length; i++) {
+      var g = SCHRIFT[text[i]];
+      if (!g) { x += 3; continue; }
+      for (var gy = 0; gy < g.length; gy++)
+        for (var gx = 0; gx < g[gy].length; gx++)
+          if (g[gy][gx] === '#') an[(x + gx) + ',' + (gy + 1)] = 1;
+      x += g[0].length + 1;
+    }
+  }
+  if (w <= COLS - 2) setzen(Math.floor((COLS - w) / 2));
+  else { var x0 = 1 - (lauf % periode); setzen(x0); setzen(x0 + periode); }
+  for (var y = 0; y < 7; y++)
+    for (var k = 0; k < COLS; k++) {
+      if (an[k + ',' + y]) { c.fillStyle = '#FFAA00'; c.fillRect(k * P, y * P, P - 2, P - 2); }
+      else { c.fillStyle = '#550000'; c.fillRect(k * P, y * P, 2, 2); }
+    }
+}
+
+// ---------- Ansicht: Liste der Strecken ----------
+function zeigeListe() {
+  ansicht = 'liste';
+  var h = '<h1>Linie 8 · Strecken</h1><div class="klein">Bis zu ' + MAXS + ' Strecken. Auf der Uhr mit hoch/runter blättern.</div><h2>Strecken</h2>';
+  if (!strecken.length) h += '<div class="klein">Noch keine Strecke eingerichtet.</div>';
+  strecken.forEach(function (s, i) {
+    h += '<div class="karte"><b>' + esc(s.a.kurz) + ' ⇄ ' + esc(s.ohneRueck ? s.b.kurz : (s.c || s.b).kurz) + '</b><br>' +
+      '<span class="klein">' + esc(s.a.name) + ' → ' + esc(s.b.name) + '<br>zurück ab ' +
+        (s.ohneRueck ? 'keiner Haltestelle' : esc((s.c || s.b).name)) + '</span><br>' +
+      (s.alle ? '<span class="klein">alle Linien </span>' : '') +
+      s.linien.map(function (l) { return '<span class="marke">' + esc(l) + '</span>'; }).join('') + '<br>' +
+      '<button class="klein" data-a="hoch" data-i="' + i + '"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
+      '<button class="klein" data-a="runter" data-i="' + i + '"' + (i === strecken.length - 1 ? ' disabled' : '') + '>▼</button>' +
+      '<button class="klein" data-a="bearbeiten" data-i="' + i + '">Bearbeiten</button>' +
+      '<button class="klein" data-a="loeschen" data-i="' + i + '">Löschen</button></div>';
+  });
+  if (strecken.length < MAXS) h += '<button data-a="neu">+ Strecke hinzufügen</button>';
+  h += '<h2>Datenquelle</h2><div class="klein">Optional: eigener RMV-Schlüssel (accessId, kostenlos bei RMV Open Data). ' +
+    'Mit Schlüssel kommen die Abfahrten vom RMV, mit Echtzeit; klappt das nicht, von Transitous (nur Fahrplan). ' +
+    'Auf der Uhr steht unten RMV oder TRANS vor der Uhrzeit.</div>' +
+    '<input type="text" id="rmvKey" placeholder="RMV-Schlüssel (leer = nur Transitous)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" value="' + esc(rmvKey) + '">' +
+    '<button data-a="rmvTest">Schlüssel prüfen</button><div class="klein" id="rmvErg">' + esc(rmvTest) + '</div>';
+  h += '<h2>Ansicht auf der Uhr</h2>' +
+    [['led', 'LED-Haltestellenanzeige', 'Standard. Orange Punkte auf Schwarz, wie am Bahnsteig'],
+     ['klar', 'Klar', 'Weiß, Systemschrift, Linie als rotes Kästchen, Namen mit Umlauten']].map(function (v) {
+      return '<label class="zeile"><input type="radio" name="layout" data-a="layout" value="' + v[0] + '"' + (layout === v[0] ? ' checked' : '') + '>' +
+        '<b>' + v[1] + '</b><br><span class="klein">' + v[2] + '</span></label>';
+    }).join('') +
+    '<div class="klein">Auch an der Uhr umschaltbar: Select lang → Einstellungen → Ansicht.</div>';
+  h += '<h2>&nbsp;</h2><button class="haupt" data-a="speichern">Speichern und an die Uhr</button><button data-a="abbrechen">Abbrechen</button>';
+  $('app').innerHTML = h;
+  if ($('rmvKey')) $('rmvKey').oninput = function () { rmvKey = this.value.trim(); };
+}
+
+function rmvPruefen() {
+  if (!rmvKey) { rmvTest = 'Kein Schlüssel eingetragen — es wird nur Transitous genutzt.'; return zeigeListe(); }
+  rmvTest = 'Prüfe …'; zeigeListe();
+  var x = new XMLHttpRequest();
+  x.open('GET', 'https://www.rmv.de/hapi/location.name?input=Wiesbaden&maxNo=1&format=json&accessId=' + encodeURIComponent(rmvKey), true);
+  x.onload = function () {
+    rmvTest = x.status === 200 ? '✓ Schlüssel funktioniert.' :
+              (x.status === 401 || x.status === 403) ? '✗ Schlüssel wird abgelehnt (HTTP ' + x.status + ').' : '✗ RMV antwortet mit HTTP ' + x.status + '.';
+    zeigeListe();
+  };
+  x.onerror = function () {
+    rmvTest = 'Von dieser Seite aus nicht prüfbar (Browser blockiert oder kein Netz). Speichern geht trotzdem — auf der Uhr steht dann RMV oder TRANS.';
+    zeigeListe();
+  };
+  x.send();
+}
+
+// ---------- Ansicht: Editor ----------
+function neuerEntwurf(s) {
+  e = s ? JSON.parse(JSON.stringify(s)) : { a: null, b: null, alle: true, linien: [] };
+  e.wahlLinie = null;              // Schritt 2: null = noch offen, '*' = alle Linien
+  e.erg = null; e.lade = null; e.filter = ''; e.suche = []; e.sucheText = ''; e.pruef = null;
+  e.rk = null; e.auswahl = [];
+  if (s) {
+    e.wahlLinie = '*';
+    if (!e.c && !e.ohneRueck) e.c = { id: e.b.id, name: e.b.name, kurz: e.b.kurz };
+    e.vorAuswahl = s.alle ? null : s.linien.slice();
+  }
+}
+
+function zeigeEditor() {
+  ansicht = 'editor';
+  var h = '<h1>Strecke ' + (e.index === undefined ? 'hinzufügen' : 'bearbeiten') + '</h1>';
+
+  // 1 Start
+  h += '<h2>1 · Start (Heimhaltestelle)</h2>';
+  if (e.a) {
+    h += '<div class="gewaehlt"><b>' + esc(e.a.name) + '</b> <button class="klein" data-a="startNeu">ändern</button></div>';
+  } else {
+    h += '<input type="text" id="sucheStart" placeholder="Haltestelle suchen" autocomplete="off" value="' + esc(e.sucheText) + '">' +
+      '<button data-a="nah">In meiner Nähe</button><ul>' +
+      e.suche.map(function (t, i) {
+        return '<li data-a="start" data-i="' + i + '">' + esc(t.name) + (t.m !== undefined ? ' <span class="klein">' + t.m + ' m</span>' : '') + '</li>';
+      }).join('') + '</ul>';
+    if (e.sucheFehler) h += '<div class="fehler">' + esc(e.sucheFehler) + '</div>';
+  }
+
+  // 2 Linie
+  if (e.a && !e.b) {
+    h += '<h2>2 · Linie</h2>';
+    if (e.lade) {
+      h += '<div class="klein">Lade Fahrtverläufe ab ' + esc(e.a.name) + ' … ' + e.lade[0] + ' / ' + e.lade[1] + '</div>' +
+        '<div class="fortschritt"><div style="width:' + (e.lade[1] ? Math.round(100 * e.lade[0] / e.lade[1]) : 0) + '%"></div></div>';
+    } else if (e.ergFehler) {
+      h += '<div class="fehler">' + esc(e.ergFehler) + '</div><button data-a="nochmal">Nochmal versuchen</button>';
+    } else if (e.erg) {
+      var linien = Object.keys(e.erg.linien).sort(sortDe);
+      h += '<ul><li data-a="linie" data-l="*" class="' + (e.wahlLinie === '*' ? 'wahl' : '') + '"><b>Alle Linien</b> <span class="klein">' + linien.length + '</span></li>' +
+        linien.map(function (l) {
+          return '<li data-a="linie" data-l="' + esc(l) + '" class="' + (e.wahlLinie === l ? 'wahl' : '') + '"><span class="marke">' + esc(l) + '</span></li>';
+        }).join('') + '</ul>';
+    }
+  }
+
+  // 3 Ziel
+  if (e.a && !e.b && e.erg && e.wahlLinie) {
+    h += '<h2>3 · Ziel</h2><input type="text" id="filterZiel" placeholder="Ziel eingrenzen" autocomplete="off" value="' + esc(e.filter) + '"><ul>';
+    var f = e.filter.toLowerCase(), treffer = [];
+    Object.keys(e.erg.ziele).sort(sortDe).forEach(function (n) {
+      var z = e.erg.ziele[n];
+      if (e.wahlLinie !== '*' && !z.linien[e.wahlLinie]) return;
+      if (f && n.toLowerCase().indexOf(f) < 0) return;
+      treffer.push(z);
+    });
+    treffer.slice(0, 60).forEach(function (z) {
+      var richt = z.hin && z.rueck ? '' : z.hin ? ' <span class="klein">nur hin</span>' : ' <span class="klein">nur zurück</span>';
+      h += '<li data-a="ziel" data-n="' + esc(z.name) + '">' + esc(z.name) + richt + '<br>' +
+        Object.keys(z.linien).sort(sortDe).map(function (l) { return '<span class="marke">' + esc(l) + '</span>'; }).join('') + '</li>';
+    });
+    h += '</ul>';
+    if (treffer.length > 60) h += '<div class="klein">' + (treffer.length - 60) + ' weitere — oben eingrenzen</div>';
+    if (!treffer.length) h += '<div class="klein">Kein Ziel gefunden.</div>';
+  }
+
+  // 3 gewählt, 4 Rückfahrt, 5 Linien, 6 Namen
+  if (e.b) {
+    h += '<h2>3 · Ziel</h2><div class="gewaehlt"><b>' + esc(e.b.name) + '</b> <button class="klein" data-a="zielNeu">ändern</button></div>';
+
+    h += '<h2>4 · Rückfahrt ab</h2>';
+    if (!e.rk || e.rk.lade) {
+      h += '<div class="klein">Suche Haltestellen bis 2 km um das Ziel mit Direktverbindung zurück …</div>';
+    } else if (!e.rk.liste.length) {
+      h += '<div class="hinweis">Keine Haltestelle bis 2 km um das Ziel fährt direkt nach ' + esc(e.a.name) + '. Auf der Uhr bleibt die untere Hälfte leer.</div>';
+    } else {
+      h += '<div class="klein">Nur Haltestellen mit Direktverbindung zurück, nach Entfernung vom Ziel.</div><ul>' +
+        e.rk.liste.map(function (k, i) {
+          return '<li data-a="rueck" data-i="' + i + '" class="' + (e.c && e.c.id === k.id ? 'wahl' : '') + '">' + esc(k.name) +
+            ' <span class="klein">' + (k.m ? k.m + ' m' : 'am Ziel') + '</span><br>' +
+            k.linien.map(function (l) { return '<span class="marke">' + esc(l) + '</span>'; }).join('') + '</li>';
+        }).join('') + '</ul>';
+    }
+
+    h += '<h2>5 · Linien auf dieser Strecke</h2>';
+    if (!e.pruef || !e.pruef.fertig || !e.rk || e.rk.lade) {
+      h += '<div class="klein">Prüfe Direktverbindungen …</div>';
+    } else if (e.pruef.fehler) {
+      h += '<div class="fehler">' + esc(e.pruef.fehler) + '</div><button data-a="pruefen">Nochmal prüfen</button>';
+    } else {
+      if (!e.pruef.hin.length) h += '<div class="hinweis">Hinweg: keine Direktverbindung ab ' + esc(e.a.name) + '. Auf der Uhr bleibt die obere Hälfte leer.</div>';
+      var cl = (e.c && e.c.linien) || [];
+      alleLinien().forEach(function (l) {
+        var info = e.pruef.hin.indexOf(l) < 0 ? ' <span class="klein">nur zurück</span>' : cl.indexOf(l) < 0 ? ' <span class="klein">nur hin</span>' : '';
+        h += '<label class="zeile"><input type="checkbox" data-a="lin" value="' + esc(l) + '"' + (e.auswahl.indexOf(l) >= 0 ? ' checked' : '') + '>' +
+          '<span class="marke">' + esc(l) + '</span>' + info + '</label>';
+      });
+      h += '<div class="klein">Geprüft an den nächsten Fahrten ab jetzt.</div>';
+
+      h += '<h2>6 · Anzeige auf der Uhr</h2>' +
+        '<div class="klein">Oben: Abfahrt ab</div><input type="text" id="kurzA" maxlength="30" value="' + esc(e.a.kurz) + '"><canvas id="vA"></canvas><div class="klein" id="hA"></div>';
+      if (e.c) h += '<div class="klein" style="margin-top:12px">Unten: Rückfahrt ab</div><input type="text" id="kurzC" maxlength="30" value="' + esc(e.c.kurz) + '"><canvas id="vC"></canvas><div class="klein" id="hC"></div>';
+    }
+  }
+
+  var ok = e.a && e.b && e.pruef && e.pruef.fertig && !e.pruef.fehler && e.rk && !e.rk.lade &&
+           (e.pruef.hin.length || e.c) && e.auswahl.length;
+  h += '<h2>&nbsp;</h2><button class="haupt" data-a="uebernehmen"' + (ok ? '' : ' disabled') + '>Übernehmen</button><button data-a="verwerfen">Zurück</button>';
+  $('app').innerHTML = h;
+
+  if ($('sucheStart')) $('sucheStart').oninput = sucheEingabe;
+  if ($('filterZiel')) $('filterZiel').oninput = function () {
+    e.filter = this.value; var pos = this.selectionStart; zeigeEditor();
+    var el = $('filterZiel'); el.focus(); el.setSelectionRange(pos, pos);
+  };
+  ['A', 'C'].forEach(function (k) {
+    var inp = $('kurz' + k);
+    if (!inp) return;
+    function akt() {
+      var t = ledText(inp.value);
+      (k === 'A' ? e.a : e.c).kurz = t;
+      vorschau($('v' + k), t);
+      $('h' + k).textContent = breite(t) > COLS - 2 ? 'zu lang für eine Zeile — läuft auf der Uhr als Lauftext durch' : 'passt in eine Zeile';
+    }
+    inp.oninput = akt; akt();
+  });
+}
+
+setInterval(function () {            // Lauftext der Vorschau
+  lauf++;
+  ['A', 'C'].forEach(function (k) {
+    var c = $('v' + k), i = $('kurz' + k);
+    if (c && i && breite(ledText(i.value)) > COLS - 2) vorschau(c, ledText(i.value));
+  });
+}, 120);
+
+// ---------- Ablauf im Editor ----------
+var wartet = null;
+function sucheEingabe() {
+  var q = this.value.trim(); e.sucheText = this.value;
+  clearTimeout(wartet);
+  if (q.length < 2) return;
+  wartet = setTimeout(function () {
+    holen('v1/geocode?type=STOP&text=' + encodeURIComponent(q), function (f, d) {
+      e.sucheFehler = f ? 'Suche: ' + f : null;
+      e.suche = f ? [] : d.filter(function (t) { return t.type === 'STOP'; }).slice(0, 12);
+      var pos = $('sucheStart') ? $('sucheStart').selectionStart : 0;
+      zeigeEditor();
+      var el = $('sucheStart'); if (el) { el.focus(); el.setSelectionRange(pos, pos); }
+    });
+  }, 300);
+}
+
+function naheSuchen() {
+  var s = ZUSTAND && ZUSTAND.standort;
+  if (!s) { e.sucheFehler = 'Standort nicht verfügbar (' + ((ZUSTAND && ZUSTAND.standortFehler) || 'unbekannt') + ')'; return zeigeEditor(); }
+  L.naechsteHaltestellen(s.lat, s.lon, 10, function (f, d) {
+    e.sucheFehler = f ? 'Suche: ' + f : null;
+    e.suche = f ? [] : d;
+    zeigeEditor();
+  });
+}
+
+function startGewaehlt(t) {
+  e.a = { id: t.id, name: t.name, kurz: kurzname(t.name, stadtVon(t.name)), lat: t.lat, lon: t.lon };
+  e.b = null; e.erg = null; e.wahlLinie = null; e.pruef = null; e.filter = '';
+  ladeErreichbar();
+}
+
+function ladeErreichbar() {
+  e.lade = [0, 0]; e.ergFehler = null; zeigeEditor();
+  erreichbar(e.a, function (n, gesamt) { e.lade = [n, gesamt]; zeigeEditor(); }, function (f, erg) {
+    e.lade = null;
+    if (f) e.ergFehler = 'Konnte Fahrten nicht laden: ' + f; else e.erg = erg;
+    zeigeEditor();
+  });
+}
+
+function zielGewaehlt(z) {
+  holen('v1/reverse-geocode?type=STOP&place=' + z.lat + ',' + z.lon, function (f, d) {   // Haltestellen-ID für die Abfrage
+    var best = null, bm = 1e9;
+    if (!f) d.forEach(function (t) {
+      if (t.type !== 'STOP') return;
+      var m = entfernung(z.lat, z.lon, t.lat, t.lon) - (t.name === z.name ? 1000 : 0);
+      if (m < bm) { bm = m; best = t; }
+    });
+    if (!best) { alert('Zu dieser Haltestelle wurde keine Kennung gefunden.'); return; }
+    e.b = { id: best.id, name: z.name, kurz: kurzname(z.name, stadtVon(e.a.name)), lat: z.lat, lon: z.lon };
+    e.c = null;
+    e.zielLinien = Object.keys(z.linien); e.zielHin = z.hin; e.zielRueck = z.rueck;
+    pruefen();
+  });
+}
+
+function alleLinien() {
+  var m = {};
+  ((e.pruef && e.pruef.hin) || []).concat((e.c && e.c.linien) || []).forEach(function (l) { m[l] = 1; });
+  return Object.keys(m).sort(sortDe);
+}
+
+function linienNeu() {                 // Vorauswahl: gewählte Linie aus Schritt 2, sonst alle
+  var alle = alleLinien(), vor = (e.wahlLinie && e.wahlLinie !== '*') ? e.wahlLinie : null;
+  if (e.vorAuswahl) {
+    e.auswahl = alle.filter(function (l) { return e.vorAuswahl.indexOf(l) >= 0; });
+    e.vorAuswahl = null;
+    if (!e.auswahl.length) e.auswahl = alle.slice();
+  } else {
+    e.auswahl = alle.filter(function (l) { return !vor || l === vor; });
+  }
+}
+
+function pruefen() {
+  if (e.b.lat === undefined) {         // ältere Einrichtung ohne Koordinaten
+    return holen('v1/geocode?type=STOP&text=' + encodeURIComponent(e.b.name), function (f, d) {
+      var t = !f && d.filter(function (x) { return x.type === 'STOP'; })[0];
+      if (!t) { e.pruef = { fertig: true, fehler: 'Ziel nicht gefunden' }; e.rk = { liste: [] }; return zeigeEditor(); }
+      e.b.lat = t.lat; e.b.lon = t.lon; pruefen();
+    });
+  }
+  e.pruef = { fertig: false }; e.rk = { lade: true, liste: [] }; zeigeEditor();
+  var offen = 2;
+  function fertig() { if (--offen) return; linienNeu(); zeigeEditor(); }
+  direkt(e.a.id, e.b.id, function (f, l) {
+    if (f) e.pruef = { fertig: true, fehler: 'Prüfung fehlgeschlagen: ' + f };
+    else {
+      if (e.zielHin) (e.zielLinien || []).forEach(function (x) { if (l.indexOf(x) < 0) l.push(x); });   // auch selten fahrende Linien
+      e.pruef = { fertig: true, hin: l.sort(sortDe) };
+    }
+    fertig();
+  });
+  rueckSuchen(fertig);
+}
+
+// Rückfahrt: Ziel selbst und Haltestellen bis 2 km darum (die 20 nächsten), nur mit Direktverbindung zum Start
+function rueckSuchen(fertig) {
+  L.rueckSuchen(e.a, e.b, { linien: e.zielLinien, rueck: e.zielRueck }, null, function (f, liste) {
+    liste = liste || [];
+    e.rk = { lade: false, liste: liste };
+    var bisher = e.c && liste.filter(function (x) { return x.id === e.c.id || x.name === e.c.name; })[0];
+    if (bisher) e.c = { id: bisher.id, name: bisher.name, kurz: e.c.kurz, linien: bisher.linien, lat: bisher.lat, lon: bisher.lon };
+    else if (liste.length) e.c = { id: liste[0].id, name: liste[0].name, kurz: kurzname(liste[0].name, stadtVon(e.a.name)), linien: liste[0].linien, lat: liste[0].lat, lon: liste[0].lon };
+    else e.c = null;
+    fertig();
+  });
+}
+
+function uebernehmen() {
+  var s = {
+    a: { id: e.a.id, name: e.a.name, kurz: e.a.kurz, lat: e.a.lat, lon: e.a.lon },
+    b: { id: e.b.id, name: e.b.name, kurz: e.b.kurz, lat: e.b.lat, lon: e.b.lon },
+    c: e.c ? { id: e.c.id, name: e.c.name, kurz: e.c.kurz, lat: e.c.lat, lon: e.c.lon } : null,
+    ohneRueck: !e.c,
+    linien: e.auswahl.slice().sort(sortDe),
+    alle: e.auswahl.length === alleLinien().length
+  };
+  if (e.index === undefined) strecken.push(s); else strecken[e.index] = s;
+  zeigeListe();
+}
+
+function schliessen(daten) {
+  document.location = 'pebblejs://close#' + encodeURIComponent(JSON.stringify(daten));
+}
+
+// ---------- Klicks ----------
+document.addEventListener('click', function (ev) {
+  var el = ev.target;
+  while (el && el !== document && !el.getAttribute('data-a')) el = el.parentNode;
+  if (!el || el === document) return;
+  var a = el.getAttribute('data-a'), i = parseInt(el.getAttribute('data-i'), 10);
+  if (a === 'lin') {
+    var l = el.value, k = e.auswahl.indexOf(l);
+    if (el.checked && k < 0) e.auswahl.push(l);
+    if (!el.checked && k >= 0) e.auswahl.splice(k, 1);
+    return zeigeEditor();
+  }
+  if (a === 'neu') { neuerEntwurf(null); return zeigeEditor(); }
+  if (a === 'bearbeiten') { neuerEntwurf(strecken[i]); e.index = i; return pruefen(); }
+  if (a === 'rueck') {
+    var k2 = e.rk.liste[i];
+    e.c = { id: k2.id, name: k2.name, kurz: kurzname(k2.name, stadtVon(e.a.name)), linien: k2.linien, lat: k2.lat, lon: k2.lon };
+    linienNeu(); return zeigeEditor();
+  }
+  if (a === 'loeschen') { if (confirm('Strecke löschen?')) { strecken.splice(i, 1); } return zeigeListe(); }
+  if (a === 'hoch' && i > 0) { strecken.splice(i - 1, 0, strecken.splice(i, 1)[0]); return zeigeListe(); }
+  if (a === 'runter' && i < strecken.length - 1) { strecken.splice(i + 1, 0, strecken.splice(i, 1)[0]); return zeigeListe(); }
+  if (a === 'layout') { layout = el.value === 'klar' ? 'klar' : 'led'; return; }
+  if (a === 'speichern') return schliessen({ strecken: strecken, rmvKey: rmvKey, layout: layout });
+  if (a === 'rmvTest') return rmvPruefen();
+  if (a === 'abbrechen') return schliessen({ abbruch: true });
+  if (a === 'nah') return naheSuchen();
+  if (a === 'start') return startGewaehlt(e.suche[i]);
+  if (a === 'startNeu') { e.a = null; e.b = null; e.erg = null; e.wahlLinie = null; e.pruef = null; return zeigeEditor(); }
+  if (a === 'nochmal') return ladeErreichbar();
+  if (a === 'linie') { e.wahlLinie = el.getAttribute('data-l'); e.filter = ''; return zeigeEditor(); }
+  if (a === 'ziel') return zielGewaehlt(e.erg.ziele[el.getAttribute('data-n')]);
+  if (a === 'zielNeu') {
+    e.b = null; e.c = null; e.pruef = null; e.rk = null;
+    if (!e.erg) return ladeErreichbar();
+    return zeigeEditor();
+  }
+  if (a === 'pruefen') return pruefen();
+  if (a === 'uebernehmen') return uebernehmen();
+  if (a === 'verwerfen') return zeigeListe();
+});
+
+zeigeListe();
+</script>
+</body>
+</html>

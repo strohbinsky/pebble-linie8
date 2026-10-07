@@ -1,0 +1,204 @@
+# Linie 8 — bus departures for Pebble Time 2
+
+<img src="docs/images/icon.png" width="50" align="right" alt="App icon">
+
+A Pebble watchapp that shows the next buses for your own routes, in local time for Wiesbaden (Germany),
+no matter which time zone the watch is in. It started as a display for bus line 8 in Wiesbaden — hence the
+name — and now handles any line and any pair of stops in the RMV area (Rhein-Main), with real-time delays.
+
+Made together by **Seb & Claude** (Anthropic): ideas, design decisions and real-world testing by Seb,
+code, tests and documentation by Claude in pair-programming sessions.
+
+> **Status:** version 3.2 (watch menu, two views, platforms) is tested in the emery emulator and with Node tests against
+> live data. Earlier versions run on a real Pebble Time 2.
+
+<p>
+  <img src="docs/images/display-led.png" width="200" alt="LED view">
+  &nbsp;
+  <img src="docs/images/display-klar.png" width="200" alt="Klar view">
+</p>
+
+*Left: the default **LED view**, styled like a dot-matrix display at a bus stop. Right: the alternative
+**Klar view** ("clear") with system fonts on white. Same data: line, platform, scheduled time, delay (`+1`)
+and minutes until departure — with the delay included.*
+
+## Features
+
+- **Up to 8 routes.** A route is a pair of stops: departures from your start stop at the top, the way back
+  at the bottom. Only direct connections are shown, so branching lines are handled correctly
+- **Real-time data from RMV** (Rhein-Main-Verkehrsverbund) with delays and cancellations, if you add your own
+  free RMV API key. Without a key, or if RMV fails, the app falls back to **[Transitous](https://transitous.org)**
+  (timetable only, no key needed). The status line shows which source was used
+- **Platform for every departure** (*Steig*), e.g. `D` at Wiesbaden Hbf — at stops with several platforms
+  (A to D) you know where to wait. Real-time platform changes from RMV are taken into account. LED view:
+  small and dimmed right after the line number, so `16 D` is not read as a line "16D"; Klar view: a small
+  dark box below the delay
+- **Two views**, switchable on the phone or on the watch: LED (default) and Klar
+- **Set up routes right on the watch** — long-press Select opens a menu:
+  new route from the stops near you, change the return stop or the start, delete. The phone does the
+  searching, the watch only shows lists
+- **Or set up routes on the phone** in the settings page of the Pebble app (no web hosting — the page is
+  embedded in the app)
+- **Wiesbaden time** computed on the watch itself (CET/CEST rule, no time zone database). When the watch is
+  set to another time zone, the LED view shows `WI`
+- Long stop names scroll like on a real platform display; scrolling stops after a minute to save battery
+
+## Controls
+
+| Button | Display | Menu |
+| --- | --- | --- |
+| Select | reload | choose |
+| **Select, long press** | **open menu** | — |
+| Up / Down | previous / next route | move (hold to scroll) |
+| Back | quit | one step back |
+
+<p>
+  <img src="docs/images/menu-led.png" width="200" alt="Menu, LED view">
+  <img src="docs/images/menu-klar.png" width="200" alt="Menu, Klar view">
+  <img src="docs/images/change-klar.png" width="200" alt="Change route">
+  <img src="docs/images/return-stops-klar.png" width="200" alt="Return stops near the destination">
+</p>
+
+*Menu in both views, "change route", and the list of return stops within 2 km of the destination
+(only stops with a direct connection back to the start).*
+
+### New route on the watch
+
+1. **Start** — the 10 nearest stops to your phone's location
+2. **Line** — all lines from that stop, or *all lines*
+3. **Destination** — alphabetical, only stops *after* the start. With more than 40 destinations (busy
+   stations) you pick the first letter first
+4. **Return from destination?** — asked only if there is a direct connection back from the destination
+5. **Return stop** — otherwise: stops within 2 km of the destination with a direct connection back,
+   sorted by distance
+6. Saved, short names are generated automatically
+
+### Switching the view
+
+- Phone: Pebble app → Linie 8 → settings → *Ansicht auf der Uhr* → LED or Klar
+- Watch: long-press Select → *Einstellungen* → *Ansicht* → LED or Klar
+
+<p>
+  <img src="docs/images/view-led.png" width="200" alt="View selection, LED">
+  <img src="docs/images/view-klar.png" width="200" alt="View selection, Klar">
+</p>
+
+The watch remembers the view itself, so it starts in the right one even before the phone answers.
+
+## Install
+
+1. Download `linie8.pbw` from the [latest release](../../releases/latest)
+2. Open it on your Android phone with the Pebble app (Core Devices) — it installs on the watch
+3. Open the app on the watch, then add routes: long-press Select → *Neue Fahrt*, or via the settings page
+
+Target platform: **emery** (Pebble Time 2, 200 × 228 px, 64 colours). The app has not been built for other
+platforms.
+
+### Optional: RMV API key for real-time data
+
+1. Register for free at [RMV Open Data](https://www.rmv.de/s/de/rmv-open-data) and request an API key (`accessId`)
+2. Enter it in the app's settings page on the phone and save
+
+The key is stored only in the Pebble app on your phone. It is never part of the source code or the `.pbw`.
+`tools/bauen.sh` refuses to build if it finds a test copy of your key anywhere in the source tree or in the
+built app.
+
+## Language
+
+The user interface, the code comments and the identifiers are in **German** (the app is for a German
+transit network). This README is in English.
+
+| German | English |
+| --- | --- |
+| Strecke | route (pair of stops) |
+| Fahrt / Rückfahrt | trip / return trip |
+| Haltestelle, Ziel | stop, destination |
+| Linie | line |
+| Ansicht | view |
+| Einstellungen | settings |
+| Neue Fahrt / Fahrt ändern / Löschen | new route / change route / delete |
+| fällt aus | cancelled |
+
+## Building
+
+Requirements (tested on macOS, without Homebrew):
+
+- `pebble-tool` 5.0 with Pebble SDK 4.33 (`uv tool install pebble-tool --python 3.12`)
+- Node.js for the tests
+- a C compiler (`cc`) for the preview renderer
+
+```bash
+tools/bauen.sh          # build only, result in dist/linie8.pbw
+tools/bauen.sh emu      # build and run in the emery emulator, with logs
+tools/bauen.sh uhr <IP> # build and install via the phone (developer connection in the Pebble app)
+```
+
+The script builds in `~/.local/share/linie8-build/`, so no `build/` folder appears next to the sources.
+
+### Preview without the SDK
+
+`tools/vorschau/` contains a minimal stand-in for `pebble.h`. It compiles `src/c/main.c` on the Mac and
+renders the LED view as a PNG in seconds — layout bugs show up here before the emulator. (The Klar view
+uses system fonts and is checked in the emulator.)
+
+```bash
+cd tools/vorschau && cc -I. -o /tmp/l8vorschau vorschau.c
+/tmp/l8vorschau <now> <status> <count> <page> <dep1..3> <ret1..3> /tmp/l8.raw
+python3 png.py /tmp/l8.raw preview.png
+```
+
+### Tests
+
+```bash
+node tools/test/ansicht_test.js   # view setting, phone ↔ settings page ↔ watch messages (offline)
+node tools/test/seite_test.js     # settings page with live Transitous data
+node tools/test/handy_test.js     # the whole watch menu flow with a simulated watch, live data
+```
+
+`handy_test.js` uses an RMV key if one is stored in `~/.config/rmv/accessId` (never printed); otherwise it
+runs on Transitous only. Example routes are around Wiesbaden Hauptbahnhof.
+
+## How it works
+
+```
+src/c/main.c                watch: LED raster, Klar view, menu and lists, time zone, buttons, AppMessage
+src/c/led_font.h            generated LED font (tools/schrift_erzeugen.py)
+src/pkjs/index.js           phone: routes, RMV/Transitous queries, message queue, menu state machine
+src/pkjs/logik.js           shared by phone script and settings page: nearby stops, reachable destinations,
+                            direct connections, short names
+src/pkjs/einstellungen.html settings page (source); tools/seite_erzeugen.py embeds it with logik.js
+tools/                      build script, preview renderer, generators, tests
+```
+
+- **Departures:** a journey search *start → destination with zero transfers* returns exactly the buses
+  that stop at both stops. The platform comes with it: RMV `Origin.rtTrack`/`track`, Transitous `from.track`. Times travel as Unix seconds (UTC); the watch converts to Wiesbaden time
+- **Watch menu:** the main menu and settings live on the watch; everything else (stop lists, lines,
+  destinations, return stops) is computed by the phone and sent in blocks of 10 entries
+- **Nearby stops:** Transitous `map/stops` (all stops in a bounding box), grouped by name
+- **Messages** are sent strictly one after another with acknowledgement; the watch inbox is 2 KB because a
+  full setup with 8 routes and names in both spellings is about 1.3 KB
+
+### Pitfalls we ran into
+
+| Problem | Fix |
+| --- | --- |
+| A platform letter right after the line number reads like a different line (`8B`) | platform drawn dimmed, LED pixels can be dimmed individually |
+| `localeCompare(b, 'de', {numeric: true})` throws "Internal error. Icu error" in the emulator's JS | own German sort as fallback (`sortDe` in `logik.js`) |
+| An exception inside a callback of the phone script fails silently, the watch waits forever | callbacks wrapped in `try/catch`, error shown as a list on the watch |
+| Transitous rate-limits bursts (HTTP 429) | at most 4 requests in parallel, retry after 1/2/4 s |
+| Transitous returns 403 without a User-Agent | send one |
+| RMV does not allow browser requests (CORS) | all RMV calls from the phone script, not from the settings page |
+| Inverted text in the LED raster is hard to read | selected row bright with an arrow, other rows dimmed |
+| Umlauts cut in half at the buffer limit | truncate by UTF-8 bytes on the phone |
+| Alloy (JavaScript on the watch) hits a "memory full" bug on the Pebble Time 2 | classic C SDK on the watch, PebbleKit JS on the phone |
+
+## Data and credits
+
+- [RMV Open Data](https://www.rmv.de/s/de/rmv-open-data) — HAFAS ReST API, real-time data (own key required)
+- [Transitous](https://transitous.org) — community-run, MOTIS-based routing API; timetable data from DELFI
+  (German national GTFS). Please be gentle with this free service
+- Pebble SDK and the Pebble app by Core Devices / Rebble
+
+## License
+
+MIT — see [LICENSE](LICENSE).
