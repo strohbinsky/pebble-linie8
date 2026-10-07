@@ -18,7 +18,7 @@ var ctx = { document: document, XMLHttpRequest: X.XMLHttpRequest, setTimeout: se
             setInterval: function () {}, alert: console.log, confirm: function () { return true; }, console: console, JSON: JSON, Math: Math };
 vm.createContext(ctx);
 vm.runInContext(script, ctx);
-function klicke(attr) { klick({ target: { getAttribute: function (k) { return attr[k] === undefined ? null : attr[k]; }, parentNode: null } }); }
+function klicke(attr) { klick({ target: { value: attr.value, getAttribute: function (k) { return attr[k] === undefined ? null : attr[k]; }, parentNode: null } }); }
 function warte(bed, cb, t0) {
   t0 = t0 || Date.now();
   if (bed()) return cb();
@@ -41,11 +41,28 @@ warte(function () { return ctx.e && ctx.e.suche && ctx.e.suche.length; }, functi
     warte(function () { return ctx.e.pruef && ctx.e.pruef.fertig && ctx.e.rk && !ctx.e.rk.lade; }, function () {
       console.log('Hin:', ctx.e.pruef.hin.join(' '), '| Rückfahrt-Kandidaten:', ctx.e.rk.liste.map(function (k) { return k.name + ' ' + k.m + 'm [' + k.linien.join(',') + ']'; }).join(' | '));
       console.log('Rückfahrt ab:', ctx.e.c && ctx.e.c.name, '| Auswahl:', ctx.e.auswahl.join(' '));
-      klicke({ 'data-a': 'uebernehmen' });
-      console.log('Liste:', text().substring(0, 160));
-      klicke({ 'data-a': 'speichern' });
-      console.log('Ergebnis:', JSON.stringify(ergebnis));
-      console.log('Abfragen:', X.zaehler.n, '| Dauer:', Math.round((Date.now() - t0) / 1000) + ' s');
+      function gesperrt() { return /data-a="uebernehmen" disabled/.test(app.innerHTML); }
+      if (gesperrt()) { console.log('FEHLER: Übernehmen gesperrt im Genau-Modus'); process.exit(1); }
+      // Umkreis (seit 3.3): nur auf Knopfdruck, Ausstieg muss bewusst gewählt werden
+      klicke({ 'data-a': 'umkreis' });
+      warte(function () { return ctx.e.rkU && !ctx.e.rkU.lade; }, function () {
+        var l = ctx.e.rkU.liste;
+        console.log('Umkreis ' + ctx.e.rkU.r + ' m: ' + l.length + ' Einstiege, z. B. ' + l.slice(0, 4).map(function (k) { return k.name + ' ' + k.m + 'm [' + k.linien + '] ' + k.ziele.length + ' Ausstiege'; }).join(' | '));
+        if (!l.length) { console.log('FEHLER: Umkreis leer'); process.exit(1); }
+        klicke({ 'data-a': 'rueckU', 'data-i': '0' });
+        if (!gesperrt()) { console.log('FEHLER: Übernehmen ohne gewählten Ausstieg möglich'); process.exit(1); }
+        var zi = l[0].ziele.findIndex(function (z) { return !z.start; });
+        console.log('Ausstiege ab ' + l[0].name + ': ' + l[0].ziele.slice(0, 5).map(function (z) { return z.name + (z.start ? ' (Start)' : ' ' + z.m + 'm'); }).join(' | '));
+        klicke({ 'data-a': 'aus', 'data-i': String(zi) });
+        if (gesperrt()) { console.log('FEHLER: Übernehmen trotz Ausstieg gesperrt'); process.exit(1); }
+        klicke({ 'data-a': 'umkreisWert', value: '2000' });
+        klicke({ 'data-a': 'uebernehmen' });
+        console.log('Liste:', text().substring(0, 200));
+        klicke({ 'data-a': 'speichern' });
+        console.log('Ergebnis:', JSON.stringify(ergebnis));
+        if (!ergebnis.strecken[0].d || ergebnis.umkreis !== 2000) { console.log('FEHLER: d oder Umkreis fehlt'); process.exit(1); }
+        console.log('Abfragen:', X.zaehler.n, '| Dauer:', Math.round((Date.now() - t0) / 1000) + ' s');
+      });
     });
   });
 });

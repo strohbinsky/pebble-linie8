@@ -9,6 +9,7 @@
   h1 { font-size: 20px; color: #FFAA00; margin: 0 0 4px; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #999; margin: 22px 0 8px; }
   .klein { font-size: 13px; color: #999; }
+  h3 { font-size: 13px; color: #ccc; margin: 14px 0 6px; font-weight: normal; }
   .hinweis { font-size: 14px; color: #FFAA00; margin: 8px 0; }
   .fehler { font-size: 14px; color: #f66; margin: 8px 0; }
   input[type=text] { width: 100%; box-sizing: border-box; padding: 12px; font-size: 17px; border: 1px solid #444; border-radius: 8px; background: #222; color: #fff; }
@@ -50,6 +51,8 @@ var e = null;                      // Entwurf der Strecke im Editor
 var rmvKey = (ZUSTAND && ZUSTAND.rmvKey) || '';
 var rmvTest = '';
 var layout = (ZUSTAND && ZUSTAND.layout) === 'klar' ? 'klar' : 'led';   // Ansicht auf der Uhr
+var umkreisWert = L.UMKREISE.indexOf(ZUSTAND && ZUSTAND.umkreis) >= 0 ? ZUSTAND.umkreis : 1000;   // Umkreis um den Start
+function kmText(m) { return m >= 1000 ? (m / 1000) + ' km' : m + ' m'; }
 
 // ---------- Hilfsfunktionen ----------
 function $(id) { return document.getElementById(id); }
@@ -100,7 +103,7 @@ function zeigeListe() {
   strecken.forEach(function (s, i) {
     h += '<div class="karte"><b>' + esc(s.a.kurz) + ' ⇄ ' + esc(s.ohneRueck ? s.b.kurz : (s.c || s.b).kurz) + '</b><br>' +
       '<span class="klein">' + esc(s.a.name) + ' → ' + esc(s.b.name) + '<br>zurück ab ' +
-        (s.ohneRueck ? 'keiner Haltestelle' : esc((s.c || s.b).name)) + '</span><br>' +
+        (s.ohneRueck ? 'keiner Haltestelle' : esc((s.c || s.b).name) + (s.d ? ' nach ' + esc(s.d.name) : '')) + '</span><br>' +
       (s.alle ? '<span class="klein">alle Linien </span>' : '') +
       s.linien.map(function (l) { return '<span class="marke">' + esc(l) + '</span>'; }).join('') + '<br>' +
       '<button class="klein" data-a="hoch" data-i="' + i + '"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
@@ -121,6 +124,13 @@ function zeigeListe() {
         '<b>' + v[1] + '</b><br><span class="klein">' + v[2] + '</span></label>';
     }).join('') +
     '<div class="klein">Auch an der Uhr umschaltbar: Select lang → Einstellungen → Ansicht.</div>';
+  h += '<h2>Umkreis für die Rückfahrt</h2><div class="klein">Normal endet die Rückfahrt genau am Start. Fährt von dort nichts, ' +
+    'kannst du beim Einrichten bewusst nach Ankunft im Umkreis um den Start suchen — so weit läufst du dann höchstens.</div>' +
+    L.UMKREISE.map(function (m) {
+      return '<label class="zeile"><input type="radio" name="umkreis" data-a="umkreisWert" value="' + m + '"' + (umkreisWert === m ? ' checked' : '') + '>' +
+        '<b>' + kmText(m) + '</b>' + (m === 1000 ? ' <span class="klein">Standard</span>' : '') + '</label>';
+    }).join('') +
+    '<div class="klein">Auch an der Uhr: Select lang → Einstellungen → Umkreis.</div>';
   h += '<h2>&nbsp;</h2><button class="haupt" data-a="speichern">Speichern und an die Uhr</button><button data-a="abbrechen">Abbrechen</button>';
   $('app').innerHTML = h;
   if ($('rmvKey')) $('rmvKey').oninput = function () { rmvKey = this.value.trim(); };
@@ -148,7 +158,7 @@ function neuerEntwurf(s) {
   e = s ? JSON.parse(JSON.stringify(s)) : { a: null, b: null, alle: true, linien: [] };
   e.wahlLinie = null;              // Schritt 2: null = noch offen, '*' = alle Linien
   e.erg = null; e.lade = null; e.filter = ''; e.suche = []; e.sucheText = ''; e.pruef = null;
-  e.rk = null; e.auswahl = [];
+  e.rk = null; e.rkU = null; e.dWahl = undefined; e.auswahl = [];
   if (s) {
     e.wahlLinie = '*';
     if (!e.c && !e.ohneRueck) e.c = { id: e.b.id, name: e.b.name, kurz: e.b.kurz };
@@ -196,13 +206,12 @@ function zeigeEditor() {
     var f = e.filter.toLowerCase(), treffer = [];
     Object.keys(e.erg.ziele).sort(sortDe).forEach(function (n) {
       var z = e.erg.ziele[n];
-      if (e.wahlLinie !== '*' && !z.linien[e.wahlLinie]) return;
+      if (!z.hin || (e.wahlLinie !== '*' && !z.linien[e.wahlLinie])) return;
       if (f && n.toLowerCase().indexOf(f) < 0) return;
       treffer.push(z);
     });
     treffer.slice(0, 60).forEach(function (z) {
-      var richt = z.hin && z.rueck ? '' : z.hin ? ' <span class="klein">nur hin</span>' : ' <span class="klein">nur zurück</span>';
-      h += '<li data-a="ziel" data-n="' + esc(z.name) + '">' + esc(z.name) + richt + '<br>' +
+      h += '<li data-a="ziel" data-n="' + esc(z.name) + '">' + esc(z.name) + '<br>' +
         Object.keys(z.linien).sort(sortDe).map(function (l) { return '<span class="marke">' + esc(l) + '</span>'; }).join('') + '</li>';
     });
     h += '</ul>';
@@ -214,18 +223,40 @@ function zeigeEditor() {
   if (e.b) {
     h += '<h2>3 · Ziel</h2><div class="gewaehlt"><b>' + esc(e.b.name) + '</b> <button class="klein" data-a="zielNeu">ändern</button></div>';
 
-    h += '<h2>4 · Rückfahrt ab</h2>';
+    h += '<h2>4 · Rückfahrt</h2>';
+    function marken(l) { return l.map(function (x) { return '<span class="marke">' + esc(x) + '</span>'; }).join(''); }
     if (!e.rk || e.rk.lade) {
       h += '<div class="klein">Suche Haltestellen bis 2 km um das Ziel mit Direktverbindung zurück …</div>';
-    } else if (!e.rk.liste.length) {
-      h += '<div class="hinweis">Keine Haltestelle bis 2 km um das Ziel fährt direkt nach ' + esc(e.a.name) + '. Auf der Uhr bleibt die untere Hälfte leer.</div>';
+    } else if (e.rk.fehler) {
+      h += '<div class="fehler">Suche fehlgeschlagen: ' + esc(e.rk.fehler) + '</div><button data-a="pruefen">Nochmal</button>';
     } else {
-      h += '<div class="klein">Nur Haltestellen mit Direktverbindung zurück, nach Entfernung vom Ziel.</div><ul>' +
+      if (!e.rk.liste.length) h += '<div class="hinweis">Keine Haltestelle bis 2 km um das Ziel fährt direkt nach ' + esc(e.a.name) + '.</div>';
+      else h += '<div class="klein">Ankunft genau in ' + esc(e.a.name) + '. Einstieg nach Entfernung vom Ziel.</div><ul>' +
         e.rk.liste.map(function (k, i) {
-          return '<li data-a="rueck" data-i="' + i + '" class="' + (e.c && e.c.id === k.id ? 'wahl' : '') + '">' + esc(k.name) +
-            ' <span class="klein">' + (k.m ? k.m + ' m' : 'am Ziel') + '</span><br>' +
-            k.linien.map(function (l) { return '<span class="marke">' + esc(l) + '</span>'; }).join('') + '</li>';
+          return '<li data-a="rueck" data-i="' + i + '" class="' + (e.c && !e.rkU && e.c.name === k.name ? 'wahl' : '') + '">' + esc(k.name) +
+            ' <span class="klein">' + (k.ziel ? 'am Ziel' : k.m + ' m') + '</span><br>' + marken(k.linien) + '</li>';
         }).join('') + '</ul>';
+      // Umkreis nur auf Wunsch
+      if (!e.rkU) h += '<button data-a="umkreis">Ankunft im Umkreis von ' + kmText(umkreisWert) + ' um den Start suchen</button>';
+      else if (e.rkU.lade) h += '<div class="klein">Suche Ankunft im Umkreis von ' + kmText(e.rkU.r) + ' … ' + (e.rkU.n ? e.rkU.n + ' / ' + e.rkU.g : '') + '</div>';
+      else if (e.rkU.fehler) h += '<div class="fehler">Suche fehlgeschlagen: ' + esc(e.rkU.fehler) + '</div><button data-a="umkreis">Nochmal</button>';
+      else {
+        h += '<h3>Einstieg, Ankunft im Umkreis von ' + kmText(e.rkU.r) + '</h3>';
+        if (!e.rkU.liste.length) h += '<div class="hinweis">Auch im Umkreis nichts gefunden.</div>' +
+          (e.rkU.r < 2000 ? '<button data-a="umkreis2">Mit 2 km suchen</button>' : '');
+        h += '<ul>' + e.rkU.liste.map(function (k, i) {
+          return '<li data-a="rueckU" data-i="' + i + '" class="' + (e.rkU.wahl === i ? 'wahl' : '') + '">' + esc(k.name) +
+            ' <span class="klein">' + (k.ziel ? 'am Ziel' : k.m + ' m') + '</span><br>' + marken(k.linien) + '</li>';
+        }).join('') + '</ul>';
+        var kw = e.rkU.liste[e.rkU.wahl];
+        if (kw) {
+          h += '<h3>Ausstieg</h3><div class="klein">Bitte wählen — nach Entfernung zum Start.</div><ul>' + kw.ziele.map(function (z, i) {
+            return '<li data-a="aus" data-i="' + i + '" class="' + (e.dWahl === i ? 'wahl' : '') + '">' + esc(z.name) +
+              ' <span class="klein">' + (z.start ? 'am Start' : z.m + ' m zum Start') + '</span><br>' + marken(z.linien) + '</li>';
+          }).join('') + '</ul>';
+        }
+        h += '<button class="klein" data-a="genau">Doch genau zum Start</button>';
+      }
     }
 
     h += '<h2>5 · Linien auf dieser Strecke</h2>';
@@ -250,7 +281,7 @@ function zeigeEditor() {
   }
 
   var ok = e.a && e.b && e.pruef && e.pruef.fertig && !e.pruef.fehler && e.rk && !e.rk.lade &&
-           (e.pruef.hin.length || e.c) && e.auswahl.length;
+           (e.pruef.hin.length || e.c) && e.auswahl.length && !(e.rkU && e.dWahl === undefined);   // Ausstieg bewusst wählen
   h += '<h2>&nbsp;</h2><button class="haupt" data-a="uebernehmen"' + (ok ? '' : ' disabled') + '>Übernehmen</button><button data-a="verwerfen">Zurück</button>';
   $('app').innerHTML = h;
 
@@ -332,7 +363,7 @@ function zielGewaehlt(z) {
     });
     if (!best) { alert('Zu dieser Haltestelle wurde keine Kennung gefunden.'); return; }
     e.b = { id: best.id, name: z.name, kurz: kurzname(z.name, stadtVon(e.a.name)), lat: z.lat, lon: z.lon };
-    e.c = null;
+    e.c = null; e.d = null; e.rkU = null;
     e.zielLinien = Object.keys(z.linien); e.zielHin = z.hin; e.zielRueck = z.rueck;
     pruefen();
   });
@@ -355,38 +386,63 @@ function linienNeu() {                 // Vorauswahl: gewählte Linie aus Schrit
   }
 }
 
-function pruefen() {
-  if (e.b.lat === undefined) {         // ältere Einrichtung ohne Koordinaten
-    return holen('v1/geocode?type=STOP&text=' + encodeURIComponent(e.b.name), function (f, d) {
-      var t = !f && d.filter(function (x) { return x.type === 'STOP'; })[0];
-      if (!t) { e.pruef = { fertig: true, fehler: 'Ziel nicht gefunden' }; e.rk = { liste: [] }; return zeigeEditor(); }
-      e.b.lat = t.lat; e.b.lon = t.lon; pruefen();
-    });
-  }
-  e.pruef = { fertig: false }; e.rk = { lade: true, liste: [] }; zeigeEditor();
-  var offen = 2;
-  function fertig() { if (--offen) return; linienNeu(); zeigeEditor(); }
-  direkt(e.a.id, e.b.id, function (f, l) {
-    if (f) e.pruef = { fertig: true, fehler: 'Prüfung fehlgeschlagen: ' + f };
-    else {
-      if (e.zielHin) (e.zielLinien || []).forEach(function (x) { if (l.indexOf(x) < 0) l.push(x); });   // auch selten fahrende Linien
-      e.pruef = { fertig: true, hin: l.sort(sortDe) };
-    }
-    fertig();
+function koord(h, fertig) {             // ältere Einrichtungen ohne Koordinaten
+  if (h.lat !== undefined) return fertig(null);
+  holen('v1/geocode?type=STOP&text=' + encodeURIComponent(h.name), function (f, d) {
+    var t = !f && d.filter(function (x) { return x.type === 'STOP'; })[0];
+    if (!t) return fertig('nicht gefunden: ' + h.name);
+    h.lat = t.lat; h.lon = t.lon; fertig(null);
   });
-  rueckSuchen(fertig);
 }
 
-// Rückfahrt: Ziel selbst und Haltestellen bis 2 km darum (die 20 nächsten), nur mit Direktverbindung zum Start
+function pruefen() {
+  e.pruef = { fertig: false }; e.rk = { lade: true, liste: [] }; zeigeEditor();
+  koord(e.a, function (f0) { koord(e.b, function (f1) {
+    if (f0 || f1) { e.pruef = { fertig: true, fehler: f0 || f1 }; e.rk = { liste: [] }; return zeigeEditor(); }
+    var offen = 2;
+    function fertig() { if (--offen) return; linienNeu(); zeigeEditor(); }
+    direkt(e.a.id, e.b.id, function (f, l) {
+      if (f) e.pruef = { fertig: true, fehler: 'Prüfung fehlgeschlagen: ' + f };
+      else {
+        if (e.zielHin) (e.zielLinien || []).forEach(function (x) { if (l.indexOf(x) < 0) l.push(x); });   // auch selten fahrende Linien
+        e.pruef = { fertig: true, hin: l.sort(sortDe) };
+      }
+      fertig();
+    });
+    rueckSuchen(fertig);
+  }); });
+}
+
+function cAus(k, linien) { return { id: k.id, name: k.name, kurz: (e.c && e.c.name === k.name && e.c.kurz) || kurzname(k.name, stadtVon(e.a.name)), linien: linien, lat: k.lat, lon: k.lon }; }
+
+// Rückfahrt (seit 3.3): erst genau zum Start; Umkreis nur auf Knopfdruck. Bisherige Wahl bleibt erhalten.
 function rueckSuchen(fertig) {
-  L.rueckSuchen(e.a, e.b, { linien: e.zielLinien, rueck: e.zielRueck }, null, function (f, liste) {
-    liste = liste || [];
-    e.rk = { lade: false, liste: liste };
-    var bisher = e.c && liste.filter(function (x) { return x.id === e.c.id || x.name === e.c.name; })[0];
-    if (bisher) e.c = { id: bisher.id, name: bisher.name, kurz: e.c.kurz, linien: bisher.linien, lat: bisher.lat, lon: bisher.lon };
-    else if (liste.length) e.c = { id: liste[0].id, name: liste[0].name, kurz: kurzname(liste[0].name, stadtVon(e.a.name)), linien: liste[0].linien, lat: liste[0].lat, lon: liste[0].lon };
-    else e.c = null;
+  var bisherD = e.d;
+  L.ankunftUm(e.a, L.GENAU_R, null, function (f, fahrten) {
+    e.rk = { lade: false, fehler: f, liste: f ? [] : L.rueckKandidaten(fahrten, e.a, e.b, 0) };
+    e.rkU = null; e.dWahl = undefined;
+    if (bisherD) { fertig(); return umkreisSuchen(umkreisWert, bisherD); }   // Strecke mit Ausstieg im Umkreis bearbeiten
+    var bisher = e.c && e.rk.liste.filter(function (x) { return x.name === e.c.name; })[0];
+    var k = bisher || e.rk.liste[0];
+    e.c = k ? cAus(k, k.linien) : null; e.d = null;
     fertig();
+  });
+}
+
+function umkreisSuchen(r, bisherD) {
+  e.rkU = { r: r, lade: true, liste: [] }; e.dWahl = undefined; zeigeEditor();
+  L.ankunftUm(e.a, r, function (n, g) { e.rkU.n = n; e.rkU.g = g; zeigeEditor(); }, function (f, fahrten) {
+    e.rkU = { r: r, lade: false, fehler: f, liste: f ? [] : L.rueckKandidaten(fahrten, e.a, e.b, r) };
+    if (bisherD && e.c) {                 // bisherige Wahl wiederfinden
+      var i = -1;
+      e.rkU.liste.forEach(function (k, j) { if (k.name === e.c.name) i = j; });
+      if (i >= 0) {
+        e.rkU.wahl = i;
+        e.rkU.liste[i].ziele.forEach(function (z, j) { if (z.name === bisherD.name) e.dWahl = j; });
+        if (e.dWahl !== undefined) { e.d = bisherD; e.c.linien = e.rkU.liste[i].ziele[e.dWahl].linien; linienNeu(); }
+      }
+    }
+    zeigeEditor();
   });
 }
 
@@ -399,6 +455,7 @@ function uebernehmen() {
     linien: e.auswahl.slice().sort(sortDe),
     alle: e.auswahl.length === alleLinien().length
   };
+  if (e.c && e.d) s.d = { id: e.d.id, name: e.d.name, kurz: kurzname(e.d.name, stadtVon(e.a.name)), lat: e.d.lat, lon: e.d.lon };
   if (e.index === undefined) strecken.push(s); else strecken[e.index] = s;
   zeigeListe();
 }
@@ -423,14 +480,31 @@ document.addEventListener('click', function (ev) {
   if (a === 'bearbeiten') { neuerEntwurf(strecken[i]); e.index = i; return pruefen(); }
   if (a === 'rueck') {
     var k2 = e.rk.liste[i];
-    e.c = { id: k2.id, name: k2.name, kurz: kurzname(k2.name, stadtVon(e.a.name)), linien: k2.linien, lat: k2.lat, lon: k2.lon };
+    e.c = cAus(k2, k2.linien); e.d = null; e.rkU = null; e.dWahl = undefined;
     linienNeu(); return zeigeEditor();
   }
+  if (a === 'umkreis') return umkreisSuchen(umkreisWert);
+  if (a === 'umkreis2') return umkreisSuchen(2000);
+  if (a === 'rueckU') { e.rkU.wahl = i; e.dWahl = undefined; return zeigeEditor(); }
+  if (a === 'aus') {
+    var kc = e.rkU.liste[e.rkU.wahl], z = kc.ziele[i];
+    e.dWahl = i;
+    e.c = cAus(kc, z.linien);
+    e.d = z.start ? null : { id: z.id, name: z.name, lat: z.lat, lon: z.lon };
+    linienNeu(); return zeigeEditor();
+  }
+  if (a === 'genau') {
+    e.rkU = null; e.dWahl = undefined; e.d = null;
+    var k3 = e.rk.liste[0];
+    e.c = k3 ? cAus(k3, k3.linien) : null;
+    linienNeu(); return zeigeEditor();
+  }
+  if (a === 'umkreisWert') { umkreisWert = parseInt(el.value, 10) || 1000; return; }
   if (a === 'loeschen') { if (confirm('Strecke löschen?')) { strecken.splice(i, 1); } return zeigeListe(); }
   if (a === 'hoch' && i > 0) { strecken.splice(i - 1, 0, strecken.splice(i, 1)[0]); return zeigeListe(); }
   if (a === 'runter' && i < strecken.length - 1) { strecken.splice(i + 1, 0, strecken.splice(i, 1)[0]); return zeigeListe(); }
   if (a === 'layout') { layout = el.value === 'klar' ? 'klar' : 'led'; return; }
-  if (a === 'speichern') return schliessen({ strecken: strecken, rmvKey: rmvKey, layout: layout });
+  if (a === 'speichern') return schliessen({ strecken: strecken, rmvKey: rmvKey, layout: layout, umkreis: umkreisWert });
   if (a === 'rmvTest') return rmvPruefen();
   if (a === 'abbrechen') return schliessen({ abbruch: true });
   if (a === 'nah') return naheSuchen();
@@ -440,7 +514,7 @@ document.addEventListener('click', function (ev) {
   if (a === 'linie') { e.wahlLinie = el.getAttribute('data-l'); e.filter = ''; return zeigeEditor(); }
   if (a === 'ziel') return zielGewaehlt(e.erg.ziele[el.getAttribute('data-n')]);
   if (a === 'zielNeu') {
-    e.b = null; e.c = null; e.pruef = null; e.rk = null;
+    e.b = null; e.c = null; e.d = null; e.pruef = null; e.rk = null; e.rkU = null;
     if (!e.erg) return ladeErreichbar();
     return zeigeEditor();
   }

@@ -69,14 +69,14 @@ function holen(von, nach, linien, fertig) {
   var xhr = new XMLHttpRequest();
   xhr.open('GET', url, true);
   // Transitous lehnt Anfragen ohne User-Agent mit 403 ab.
-  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/2.2 (privat)'); } catch (e) {}
+  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/3.3 (privat)'); } catch (e) {}
   xhr.onload = function () {
     if (xhr.status !== 200) { console.log('HTTP ' + xhr.status); return ende(STATUS_FEHLER); }
     try {
       var daten = JSON.parse(xhr.responseText), liste = [], live = false, gesehen = {};
       (daten.itineraries || []).forEach(function (it) {
         var fahrten = it.legs.filter(function (l) { return l.mode !== 'WALK'; });
-        if (fahrten.length !== 1) return;
+        if (fahrten.length !== 1 || !L.oepnv(fahrten[0])) return;   // keine Mitfahrbörse
         var f = fahrten[0];
         if (linien && linien.length && linien.indexOf(f.routeShortName) < 0) return;
         var t = Math.floor(Date.parse(f.startTime) / 1000), k = t + '|' + f.routeShortName;
@@ -195,6 +195,15 @@ function holenRmv(von, nach, linien, fertig) {
 // ---------- An die Uhr ----------
 // Rückfahrt startet an c (eigene Haltestelle nahe dem Ziel); ältere Einrichtungen ohne c: am Ziel b.
 function rueckStart(st) { return st.ohneRueck ? null : (st.c || st.b); }
+// Rückfahrt endet an d (bewusst gewählter Ausstieg im Umkreis um A, seit 3.3); ohne d genau am Start a.
+function rueckZiel(st) { return st.d || st.a; }
+
+// Umkreis um den Start für die Rückfahrt-Suche: 500 / 1000 / 2000 m, Standard 1000. Uhr-Menü und Seite.
+function umkreis() {
+  var u = parseInt(localStorage.getItem('umkreis'), 10);
+  return L.UMKREISE.indexOf(u) >= 0 ? u : 1000;
+}
+function umkreisText(m) { return m >= 1000 ? (m / 1000) + T('KM', ' km') : m + T('M', ' m'); }
 
 // Ansicht: 'led' (Standard) oder 'klar'. Einstellbar am Handy (Seite) und an der Uhr (Menü Einstellungen).
 function layout() { return localStorage.getItem('layout') === 'klar' ? 'klar' : 'led'; }
@@ -205,6 +214,7 @@ function einrichtungSenden() {
   msg[keys.ANZAHL] = liste.length;
   msg[keys.SEITE] = aktiveSeite();
   msg[keys.LAYOUT] = layout() === 'klar' ? 1 : 0;
+  msg[keys.UMKREIS] = umkreis();
   for (var i = 0; i < liste.length && i < MAXS; i++) {
     var c = rueckStart(liste[i]), stadt = L.stadtVon(liste[i].a.name);
     msg[keys.NAME_A + i] = liste[i].a.kurz;
@@ -246,7 +256,7 @@ function richtungenLaden(st, quelle, fertig) {
   });
   var c = rueckStart(st);
   if (!c) { eintragen(keys.RUECK, keys.RUECK_L, keys.RUECK_D, keys.RUECK_S, { fahrten: [], live: true }); eins(); return; }
-  abfrage(c, st.a, function (f, erg) {
+  abfrage(c, rueckZiel(st), function (f, erg) {
     if (f !== null) fehler = f; else eintragen(keys.RUECK, keys.RUECK_L, keys.RUECK_D, keys.RUECK_S, erg);
     eins();
   });
@@ -299,7 +309,7 @@ Pebble.addEventListener('appmessage', function (e) { // Select oder Blättern au
 // Uhr -> Handy: AKTION + WAHL. Handy -> Uhr: Liste (L_TITEL, L_ANZAHL, L_AB, L_TEXT[10]) in Blöcken zu 10,
 // Fortschritt L_LADE, L_ANZAHL = -1 heißt "Ablauf beendet, zurück ins Uhr-Menü".
 // Nach jeder Änderung: localStorage -> einrichtungSenden() -> streckeLaden() — dieselben Strecken wie am Handy.
-var A_NEU = 1, A_AENDERN_RUECK = 2, A_AENDERN_START = 3, A_LOESCHEN = 4, A_WAHL = 5, A_ZURUECK = 6, A_LAYOUT = 7;
+var A_NEU = 1, A_AENDERN_RUECK = 2, A_AENDERN_START = 3, A_LOESCHEN = 4, A_WAHL = 5, A_ZURUECK = 6, A_LAYOUT = 7, A_UMKREIS = 8;
 var BLOCK = 10;        // muss zu L_TEXT[10] in package.json passen
 var MAXL = 300;        // muss zu MAXL in main.c passen
 var LTXT = 31;         // Zeichen je Listeneintrag (Puffer 32 auf der Uhr)
@@ -311,7 +321,7 @@ function transitousHolen(pfad, fertig) {
   function ende(f, d) { if (!erledigt) { erledigt = true; fertig(f, d); } }
   var xhr = new XMLHttpRequest();
   xhr.open('GET', 'https://api.transitous.org/api/' + pfad, true);
-  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/3.0 (privat)'); } catch (e) {}
+  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/3.3 (privat)'); } catch (e) {}
   xhr.onload = function () {
     if (xhr.status !== 200) return ende('HTTP ' + xhr.status);
     try { ende(null, JSON.parse(xhr.responseText)); } catch (e) { ende('Antwort unlesbar'); }
@@ -322,7 +332,7 @@ function transitousHolen(pfad, fertig) {
 }
 var L = Logik(transitousHolen, SCHRIFT.F35);
 
-var ablauf = null;     // laufender Menü-Ablauf: { ziel, nurRueck, schritte[], a, linie, erg, b, extra, hin, gen }
+var ablauf = null;     // laufender Menü-Ablauf: { ziel, nurRueck, schritte[], a, linie, erg, b, extra, hin, genau, gen }
 
 function listeSenden(titel, texte) {
   schlange = schlange.filter(function (x) { return !x.liste; });   // Blöcke einer veralteten Liste verwerfen
@@ -385,6 +395,9 @@ function mitM(name, m, stadt) {        // Entfernung hinten, Name notfalls gekü
   var hinten = m ? ' ' + m + T('M', ' m') : '';
   return L.utf8Kuerzen(nameT(name, stadt), LTXT - hinten.length) + hinten;
 }
+function mitZusatz(name, zusatz, stadt) {   // "(ZIEL)" / "(START)" hinten, Name notfalls gekürzt
+  return L.utf8Kuerzen(nameT(name, stadt), LTXT - zusatz.length) + zusatz;
+}
 function vereinigen(a, b) {
   var m = {};
   (a || []).concat(b || []).forEach(function (x) { m[x] = 1; });
@@ -403,6 +416,7 @@ function schrittNah() {
       if (!liste.length) return fehlerSchritt('leer', schrittNah);
       schritt(T('START', 'Start'), liste.map(function (h) { return { t: mitM(h.name, h.m, L.stadtVon(h.name)), h: h }; }), function (x) {
         ablauf.a = halt(x.h);
+        vorladen(ablauf.a);                // Rückfahrt-Daten laden, während Linie und Ziel gewählt werden
         schrittLinie();
       });
     }));
@@ -477,53 +491,110 @@ function nurLinie(liste) {              // gewählte Linie aus Schritt 2 (oder a
   return (!l || l === '*') ? liste : liste.filter(function (x) { return x === l; });
 }
 
-// 4. Hinweg-Linien und Direktverbindung vom Ziel zurück prüfen
+// Rückfahrt (seit 3.3). Grundsatz: Ankunft genau am Start A ist der Normalfall; der Umkreis um A gilt nur,
+// wenn er bewusst gewählt wird — nie automatisch. Gespeichert und abgefragt wird immer genau c -> d (ohne d: A).
+// Daten: Fahrten, die an A (bzw. im Umkreis) ankommen — L.ankunftUm, vorgeladen sobald A feststeht.
+function vorladen(a) {
+  if (a.lat === undefined) return;
+  L.ankunftUm(a, L.GENAU_R, null, function () { L.ankunftUm(a, umkreis(), null, function () {}); });
+}
+
+function bevorzugt(liste) {             // Einträge mit der gewählten Linie bevorzugen, sonst alle
+  var erlaubt = (ablauf.linie && ablauf.linie !== '*') ? [ablauf.linie] : ablauf.erlaubt;
+  if (!erlaubt) return liste;
+  var passend = liste.filter(function (k) { return k.linien.some(function (l) { return erlaubt.indexOf(l) >= 0; }); });
+  return passend.length ? passend : liste;
+}
+
+function einstiegText(k, stadt) {
+  return k.ziel ? mitZusatz(k.name, T(' (ZIEL)', ' (Ziel)'), stadt) : mitM(k.name, k.m, stadt);
+}
+
+function genauLaden(weiter) {           // Kandidaten mit Ankunft genau an A, einmal je Ablauf
+  if (ablauf.genau) return weiter(null);
+  L.ankunftUm(ablauf.a, L.GENAU_R, aktuell(function (n, g) { ladeSenden(T('SUCHE ', 'Suche ') + n + '/' + g); }), aktuell(function (f, fahrten) {
+    if (!f) ablauf.genau = L.rueckKandidaten(fahrten, ablauf.a, ablauf.b, 0);
+    weiter(f);
+  }));
+}
+
+// 4. Hinweg-Linien prüfen; fährt vom Ziel etwas genau nach A zurück: Frage "Zurück ab Ziel?"
 function schrittPruefen() {
   ladeSenden(T('PRUEFE', 'Prüfe'), true);
-  var a = ablauf.a, b = ablauf.b, ex = ablauf.extra, offen = 2, hin = null, rueck = null, fehler = null;
+  var a = ablauf.a, b = ablauf.b, ex = ablauf.extra, offen = 2, hin = null, fehler = null;
   var fertig = aktuell(function () {
     if (--offen) return;
     if (fehler) return fehlerSchritt(fehler, schrittPruefen);
     ablauf.hin = vereinigen(hin, ex.hin ? ex.linien : []);
-    var zurueck = nurLinie(vereinigen(rueck, ex.rueck ? ex.linien : []));
+    var amZiel = ablauf.genau.filter(function (k) { return k.ziel; })[0];
+    var zurueck = amZiel ? nurLinie(amZiel.linien) : [];
     if (!zurueck.length) return schrittRueck(true);
     schritt(T('ZURUECK AB ZIEL?', 'Zurück ab Ziel?'), [{ t: T('JA', 'Ja'), ja: true }, { t: T('NEIN', 'Nein') }], function (x) {
-      if (x.ja) { var c = halt(b); c.linien = zurueck; return speichern(c); }
+      if (x.ja) { var c = halt(b); c.linien = zurueck; return speichern(c, null); }
       schrittRueck(true);
     });
   });
   L.direkt(a.id, b.id, function (f, l) { if (f) fehler = f; else hin = l; fertig(); });
-  L.direkt(b.id, a.id, function (f, l) { if (f) fehler = f; else rueck = l; fertig(); });
+  genauLaden(function (f) { if (f) fehler = f; fertig(); });
 }
 
-// 5. Rückfahrt-Haltestellen bis 2 km um das Ziel, nach Entfernung, nur mit Direktverbindung zum Start.
+// 5. Einstieg bis 2 km um das Ziel, nur mit Direktverbindung genau nach A. Darunter: Umkreis, ohne Rückfahrt.
 //    ohneZiel: das Ziel selbst nicht anbieten (dort wurde "nein" gesagt oder es fährt nichts zurück).
 function schrittRueck(ohneZiel) {
   ladeSenden(T('SUCHE', 'Suche'), true);
-  var a = ablauf.a, b = ablauf.b;
-  L.rueckSuchen(a, b, ablauf.extra, aktuell(function (n, gesamt) { ladeSenden(T('SUCHE ', 'Suche ') + n + '/' + gesamt); }), aktuell(function (f, liste) {
+  genauLaden(function (f) {
     if (f) return fehlerSchritt(f, function () { schrittRueck(ohneZiel); });
-    liste = liste.filter(function (k) { return !(ohneZiel && k.m === 0); });
-    var erlaubt = (ablauf.linie && ablauf.linie !== '*') ? [ablauf.linie] : ablauf.erlaubt;
-    if (erlaubt) {                       // Haltestellen mit der gewählten Linie bevorzugen, sonst alle
-      var passend = liste.filter(function (k) { return k.linien.some(function (l) { return erlaubt.indexOf(l) >= 0; }); });
-      if (passend.length) liste = passend;
-    }
-    var stadt = L.stadtVon(a.name);
-    var eintraege = liste.map(function (k) {
-      return { t: k.m ? mitM(k.name, k.m, stadt) : nameT(k.name, stadt) + T(' (ZIEL)', ' (Ziel)'), k: k };
-    });
-    if (!eintraege.length) eintraege = [{ t: T('OHNE RUECKFAHRT', 'Ohne Rückfahrt') }];
-    schritt(T('RUECKFAHRT AB', 'Rückfahrt ab'), eintraege, function (x) {
-      if (!x.k) return speichern(null);
+    var stadt = L.stadtVon(ablauf.a.name), r = umkreis();
+    var liste = bevorzugt(ablauf.genau.filter(function (k) { return !(ohneZiel && k.ziel); }));
+    var eintraege = liste.map(function (k) { return { t: einstiegText(k, stadt), k: k }; });
+    var titel = eintraege.length ? T('RUECKFAHRT AB', 'Rückfahrt ab') : T('NICHTS NACH ', 'Nichts nach ') + nameT(ablauf.a.name, stadt);
+    eintraege.push({ t: T('UMKREIS ', 'Umkreis ') + umkreisText(r), umkreis: r });
+    eintraege.push({ t: T('OHNE RUECKFAHRT', 'Ohne Rückfahrt'), ohne: true });
+    schritt(titel, eintraege, function (x) {
+      if (x.ohne) return speichern(null, null);
+      if (x.umkreis) return schrittEinstieg(x.umkreis);
       var c = halt(x.k); c.linien = x.k.linien;
-      speichern(c);
+      speichern(c, null);
+    });
+  });
+}
+
+// 5b. Nur nach bewusster Wahl: Einstieg mit Ankunft im Umkreis r um A. Leer: größeren Umkreis anbieten.
+function schrittEinstieg(r) {
+  ladeSenden(T('SUCHE', 'Suche'), true);
+  var a = ablauf.a, b = ablauf.b, stadt = L.stadtVon(a.name);
+  L.ankunftUm(a, r, aktuell(function (n, g) { ladeSenden(T('SUCHE ', 'Suche ') + n + '/' + g); }), aktuell(function (f, fahrten) {
+    if (f) return fehlerSchritt(f, function () { schrittEinstieg(r); });
+    var eintraege = bevorzugt(L.rueckKandidaten(fahrten, a, b, r)).map(function (k) { return { t: einstiegText(k, stadt), k: k }; });
+    var titel = T('EINSTIEG ', 'Einstieg ') + umkreisText(r);
+    if (!eintraege.length) {
+      titel = T('NICHTS IM UMKREIS', 'Nichts im Umkreis');
+      var groesser = L.UMKREISE.filter(function (u) { return u > r; })[0];
+      if (groesser) eintraege.push({ t: T('UMKREIS ', 'Umkreis ') + umkreisText(groesser), umkreis: groesser });
+      eintraege.push({ t: T('OHNE RUECKFAHRT', 'Ohne Rückfahrt'), ohne: true });
+    }
+    schritt(titel, eintraege, function (x) {
+      if (x.ohne) return speichern(null, null);
+      if (x.umkreis) return schrittEinstieg(x.umkreis);
+      schrittAusstieg(x.k);
     });
   }));
 }
 
+// 5c. Ausstieg selbst wählen, immer mit Bestätigung: A zuerst, sonst nach Entfernung zu A
+function schrittAusstieg(k) {
+  var stadt = L.stadtVon(ablauf.a.name);
+  var eintraege = bevorzugt(k.ziele).map(function (z) {
+    return { t: z.start ? mitZusatz(z.name, T(' (START)', ' (Start)'), stadt) : mitM(z.name, z.m, stadt), z: z };
+  });
+  schritt(T('AUSSTIEG', 'Ausstieg'), eintraege, function (x) {
+    var c = halt(k); c.linien = x.z.linien;
+    speichern(c, x.z.start ? null : halt(x.z));
+  });
+}
+
 // 6. Strecke speichern, Kurznamen automatisch, Seite anzeigen
-function speichern(c) {
+function speichern(c, d) {
   var liste = strecken(), stadt = L.stadtVon(ablauf.a.name), st, i = ablauf.ziel;
   function mitKurz(h) { return h && { id: h.id, name: h.name, kurz: L.kurzname(h.name, stadt), lat: h.lat, lon: h.lon }; }
   if (ablauf.nurRueck) {                 // Fahrt ändern -> Rückfahrt: nur c ersetzen
@@ -531,6 +602,7 @@ function speichern(c) {
     if (!st) return menueEnde();
     var cl = c ? c.linien : [];
     st.c = mitKurz(c);
+    if (c && d) st.d = mitKurz(d); else delete st.d;
     st.ohneRueck = !c;
     if (st.alle) st.linien = vereinigen(st.linien, cl);
     else if (c && !cl.some(function (l) { return st.linien.indexOf(l) >= 0; })) st.linien = vereinigen(st.linien, cl);
@@ -538,6 +610,7 @@ function speichern(c) {
     var l = ablauf.linie, cl2 = c ? c.linien : [];
     st = { a: { id: ablauf.a.id, name: ablauf.a.name, kurz: L.kurzname(ablauf.a.name, L.stadtVon(ablauf.a.name)), lat: ablauf.a.lat, lon: ablauf.a.lon },
            b: mitKurz(ablauf.b), c: mitKurz(c), ohneRueck: !c };
+    if (c && d) st.d = mitKurz(d);
     if (l && l !== '*') {
       st.alle = false;
       st.linien = (c && cl2.indexOf(l) < 0) ? vereinigen([l], cl2) : [l];
@@ -550,7 +623,7 @@ function speichern(c) {
   }
   localStorage.setItem('strecken', JSON.stringify(liste));
   localStorage.setItem('seite', String(i));
-  console.log('Menü: Strecke ' + (i + 1) + ' gespeichert: ' + st.a.kurz + ' -> ' + st.b.kurz + ', zurück ab ' + (st.c ? st.c.kurz : '-') + ' [' + st.linien.join(',') + (st.alle ? ' alle' : '') + ']');
+  console.log('Menü: Strecke ' + (i + 1) + ' gespeichert: ' + st.a.kurz + ' -> ' + st.b.kurz + ', zurück ab ' + (st.c ? st.c.kurz : '-') + (st.d ? ' nach ' + st.d.kurz : '') + ' [' + st.linien.join(',') + (st.alle ? ' alle' : '') + ']');
   ablauf = null;
   einrichtungSenden();                   // Uhr schließt das Menü, sobald die Einrichtung ankommt
   streckeLaden(i);
@@ -589,6 +662,11 @@ function menueAktion2(aktion, wahl) {
     console.log('Menü: Ansicht ' + layout());
     return;
   }
+  if (aktion === A_UMKREIS) {            // an der Uhr gewählt (Meter)
+    if (L.UMKREISE.indexOf(wahl) >= 0) localStorage.setItem('umkreis', String(wahl));
+    console.log('Menü: Umkreis ' + umkreis());
+    return;
+  }
   if (aktion === A_NEU || aktion === A_AENDERN_START) {
     ablauf = { ziel: aktion === A_NEU ? -1 : wahl, schritte: [], gen: 0, laedt: true };
     return schrittNah();
@@ -598,9 +676,12 @@ function menueAktion2(aktion, wahl) {
     if (!st) return menueEnde();
     ablauf = { ziel: wahl, nurRueck: true, schritte: [], gen: 0, laedt: true, a: halt(st.a), b: halt(st.b),
                extra: null, erlaubt: st.alle ? null : st.linien };
-    return koordinaten(ablauf.b, aktuell(function (f) {
-      if (f) return fehlerSchritt(f, function () { menueAktion2(A_AENDERN_RUECK, wahl); });
-      schrittRueck(false);
+    return koordinaten(ablauf.a, aktuell(function (f0) {
+      koordinaten(ablauf.b, aktuell(function (f) {
+        if (f0 || f) return fehlerSchritt(f0 || f, function () { menueAktion2(A_AENDERN_RUECK, wahl); });
+        vorladen(ablauf.a);
+        schrittRueck(false);
+      }));
     }));
   }
   if (!ablauf) return menueEnde();
@@ -623,7 +704,7 @@ function menueAktion2(aktion, wahl) {
 // ---------- Einstellungen: eingebettete Seite ----------
 function seiteOeffnen(standort, standortFehler) {
   var zustand = { strecken: strecken(), standort: standort, standortFehler: standortFehler, schrift: SCHRIFT.F35,
-                  rmvKey: rmvSchluessel(), layout: layout() };
+                  rmvKey: rmvSchluessel(), layout: layout(), umkreis: umkreis() };
   var html = SEITE_HTML.replace('/*ZUSTAND*/null', function () { return JSON.stringify(zustand); });
   Pebble.openURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
 }
@@ -647,6 +728,7 @@ Pebble.addEventListener('webviewclosed', function (e) {
     if (!daten.strecken) return;                      // Abbrechen
     if (daten.rmvKey !== undefined) localStorage.setItem('rmvKey', String(daten.rmvKey).trim());
     if (daten.layout === 'klar' || daten.layout === 'led') localStorage.setItem('layout', daten.layout);
+    if (L.UMKREISE.indexOf(daten.umkreis) >= 0) localStorage.setItem('umkreis', String(daten.umkreis));
     ablauf = null;
     localStorage.setItem('strecken', JSON.stringify(daten.strecken.slice(0, MAXS)));
     localStorage.setItem('seite', '0');

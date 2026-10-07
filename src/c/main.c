@@ -31,14 +31,16 @@
 #define LZ_H  7            // Zeilenabstand in Punkten
 #define LADE_MS 30000      // ohne Antwort vom Handy: "KEINE ANTWORT"
 #define PK_LAYOUT 1        // persist-Schlüssel: Ansicht, damit sie schon vor der Antwort des Handys stimmt
+#define PK_UMKREIS 2       // persist-Schlüssel: Umkreis um den Start für die Rückfahrt-Suche (Meter)
 
 enum { ST_LEER = -2, ST_LADE = -1, ST_SOLL = 0, ST_LIVE = 1, ST_NETZ = 2, ST_FEHLER = 3 };
 enum { M_ANZEIGE, M_LISTE, M_LADE };                       // was die Uhr gerade zeigt
-enum { L_HANDY, L_MENUE, L_AENDERN, L_EINST, L_ANSICHT };  // woher die Liste stammt
+enum { L_HANDY, L_MENUE, L_AENDERN, L_EINST, L_ANSICHT, L_UMKREIS };  // woher die Liste stammt
 enum { LAYOUT_LED = 0, LAYOUT_KLAR = 1 };
 enum { A_UNTERMENUE = 0, A_NEU = 1, A_AENDERN_RUECK = 2, A_AENDERN_START = 3, A_LOESCHEN = 4,
-       A_WAHL = 5, A_ZURUECK = 6, A_LAYOUT = 7,
-       A_EINST = -1, A_ANSICHT = -2, A_SET_LED = -3, A_SET_KLAR = -4 };   // negative: nur auf der Uhr                        // AKTION an das Handy, wie in index.js
+       A_WAHL = 5, A_ZURUECK = 6, A_LAYOUT = 7, A_UMKREIS = 8,
+       A_EINST = -1, A_ANSICHT = -2, A_SET_LED = -3, A_SET_KLAR = -4,
+       A_UMK = -5, A_SET_U500 = -6, A_SET_U1000 = -7, A_SET_U2000 = -8 };   // negative: nur auf der Uhr                        // AKTION an das Handy, wie in index.js
 
 static Window *s_window;
 static Layer *s_layer;
@@ -74,6 +76,7 @@ static char s_ltitel[LTXT];
 static char s_ltext[MAXL][LTXT];    // 300 x 32 = 9,6 KB
 static int8_t s_lakt[6];            // Aktion je Eintrag der Uhr-eigenen Menüs
 static int s_layout = LAYOUT_LED;
+static int s_umkreis = 1000;      // Meter; das Handy führt den Wert, die Uhr zeigt und ändert ihn
 #define T(led, klar) (s_layout == LAYOUT_KLAR ? (klar) : (led))   // Menütexte je Ansicht
 static int s_lanz, s_lsel, s_loben;
 static char s_ladetext[LTXT];
@@ -698,9 +701,28 @@ static void aendern_zeigen(void) {                     // Fahrt ändern: Rückfa
   layer_mark_dirty(s_layer);
 }
 
+static void umkreis_text(char *buf, size_t n, const char *vor, int m) {   // "UMKREIS 1KM" / "Umkreis: 1 km"
+  if (m >= 1000) snprintf(buf, n, T("%s%dKM", "%s%d km"), vor, m / 1000);
+  else snprintf(buf, n, T("%s%dM", "%s%d m"), vor, m);
+}
+
 static void einstellungen_zeigen(void) {               // Menü > Einstellungen, kennt die Uhr selbst
+  char buf[LTXT];
   liste_beginnen(L_EINST, T("EINSTELLUNGEN", "Einstellungen"));
   eintrag(s_layout == LAYOUT_KLAR ? "Ansicht: Klar" : "ANSICHT: LED", A_ANSICHT);
+  umkreis_text(buf, sizeof(buf), T("UMKREIS ", "Umkreis: "), s_umkreis);
+  eintrag(buf, A_UMK);
+  layer_mark_dirty(s_layer);
+}
+
+static void umkreis_zeigen(void) {                     // Umkreis um den Start für die Rückfahrt, aktueller vorausgewählt
+  char buf[LTXT];
+  liste_beginnen(L_UMKREIS, T("UMKREIS UM START", "Umkreis um Start"));
+  umkreis_text(buf, sizeof(buf), "", 500);  eintrag(buf, A_SET_U500);
+  umkreis_text(buf, sizeof(buf), "", 1000); eintrag(buf, A_SET_U1000);
+  umkreis_text(buf, sizeof(buf), "", 2000); eintrag(buf, A_SET_U2000);
+  s_lsel = s_umkreis == 500 ? 0 : s_umkreis == 2000 ? 2 : 1;
+  lauf_starten();
   layer_mark_dirty(s_layer);
 }
 
@@ -745,6 +767,18 @@ static void aktion_senden(int aktion, int wahl) {      // mit Antwort vom Handy:
 static void layout_setzen(int v) {
   s_layout = v == LAYOUT_KLAR ? LAYOUT_KLAR : LAYOUT_LED;
   persist_write_int(PK_LAYOUT, s_layout);
+}
+
+static void umkreis_setzen(int m) {
+  s_umkreis = (m == 500 || m == 2000) ? m : 1000;
+  persist_write_int(PK_UMKREIS, s_umkreis);
+}
+
+static void umkreis_waehlen(int m) {                   // an der Uhr gewählt: merken, Handy Bescheid geben
+  umkreis_setzen(m);
+  aktion_abschicken(A_UMKREIS, s_umkreis);
+  einstellungen_zeigen();
+  s_lsel = 1;                                          // zurück auf dem Eintrag Umkreis
 }
 
 static void layout_waehlen(int v) {                    // an der Uhr umgeschaltet: merken, Handy Bescheid geben
@@ -810,6 +844,10 @@ static void liste_waehlen(void) {
   else if (a == A_ANSICHT) ansicht_zeigen();
   else if (a == A_SET_LED) layout_waehlen(LAYOUT_LED);
   else if (a == A_SET_KLAR) layout_waehlen(LAYOUT_KLAR);
+  else if (a == A_UMK) umkreis_zeigen();
+  else if (a == A_SET_U500) umkreis_waehlen(500);
+  else if (a == A_SET_U1000) umkreis_waehlen(1000);
+  else if (a == A_SET_U2000) umkreis_waehlen(2000);
   else aktion_senden(a, s_seite);                      // Löschen ohne Rückfrage: eine neue Fahrt ist schnell angelegt
 }
 
@@ -818,7 +856,7 @@ static void zurueck(void) {
     case M_ANZEIGE: window_stack_pop(true); break;     // App beenden
     case M_LISTE:
       if (s_lart == L_AENDERN || s_lart == L_EINST) menue_zeigen();
-      else if (s_lart == L_ANSICHT) einstellungen_zeigen();
+      else if (s_lart == L_ANSICHT || s_lart == L_UMKREIS) einstellungen_zeigen();
       else if (s_lart == L_MENUE) anzeige_zeigen();
       else aktion_senden(A_ZURUECK, 0);
       break;
@@ -852,6 +890,7 @@ static void empfangen(DictionaryIterator *it, void *ctx) {
     t = dict_find(it, MESSAGE_KEY_SEITE);
     if (t) s_seite = begrenzen(t->value->int32, 0, s_anzahl > 0 ? s_anzahl - 1 : 0);
     if ((t = dict_find(it, MESSAGE_KEY_LAYOUT))) layout_setzen(t->value->int32);   // Handy führt die Einstellung
+    if ((t = dict_find(it, MESSAGE_KEY_UMKREIS))) umkreis_setzen(t->value->int32);
     if (s_anzahl == 0 && s_timeout) { app_timer_cancel(s_timeout); s_timeout = NULL; }
     if (s_modus != M_ANZEIGE) {                          // Menü-Ablauf fertig (gespeichert, gelöscht)
       anzeige_zeigen();
@@ -934,6 +973,7 @@ static void init(void) {
   const uint32_t ein = app_message_inbox_size_maximum();
   app_message_open(ein < 2048 ? ein : 2048, 64);
   if (persist_exists(PK_LAYOUT)) s_layout = persist_read_int(PK_LAYOUT) == LAYOUT_KLAR ? LAYOUT_KLAR : LAYOUT_LED;
+  if (persist_exists(PK_UMKREIS)) umkreis_setzen(persist_read_int(PK_UMKREIS));
 
   s_window = window_create();
   window_set_background_color(s_window, GColorBlack);

@@ -5,10 +5,13 @@
 //   schrift              LED-Glyphen F35 (für Breite und Kurzname)
 function Logik(holenRoh, schrift) {
   var COLS = 66;               // Breite des LED-Rasters auf der Uhr
-  var UMKREIS_RUECK = 2000;    // Rückfahrt-Haltestellen bis 2 km um das Ziel
-  var MAX_RUECK = 20;          // davon die 20 nächsten prüfen (je eine Verbindungssuche)
+  var UMKREIS_B = 2000;        // Rückfahrt: Einstieg bis 2 km um das Ziel (Bummeln)
+  var GENAU_R = 300;           // Rückfahrt genau zum Start: Ankünfte in 300 m abfragen …
+  var GENAU_M = 150;           // … und gleichen Namen oder bis 150 m als Start zählen
+  var UMKREISE = [500, 1000, 2000];   // wählbarer Umkreis um den Start (Einstellungen), Standard 1000
   var GLEICHZEITIG = 4;        // so viele Abfragen parallel (Transitous drosselt bei mehr, HTTP 429)
   var cacheErreichbar = {};    // Start-ID -> Ergebnis
+  var cacheAnkunft = {};       // 'Start-ID|Radius' -> { fertig, f, erg, warten[] }
 
   // Transitous antwortet bei vielen Abfragen mit HTTP 429: nach 1, 2, 4 s erneut versuchen
   function holen(pfad, fertig, versuch) {
@@ -22,6 +25,9 @@ function Logik(holenRoh, schrift) {
   // Deutsche Sortierung, Zahlen numerisch. localeCompare mit Sprache wirft im Emulator-JS einen ICU-Fehler
   // ("Internal error. Icu error") — dann eigener Vergleich: Umlaute wie Grundbuchstaben, Ziffernfolgen als Zahl.
   var kollator = true;
+  // Nur Linienverkehr: Transitous führt auch Mitfahrbörsen (MiFAZ, Datenquelle amarillo) als RIDE_SHARING ohne Liniennamen
+  function oepnv(x) { return x && x.mode !== 'RIDE_SHARING' && !!x.routeShortName; }
+
   function grund(s) {
     return String(s).toLowerCase().replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/ß/g, 'ss');
   }
@@ -150,12 +156,50 @@ function Logik(holenRoh, schrift) {
   // ---------- Erreichbare Ziele ab einem Start ----------
   // Abfahrtsliste am Start, je Muster Linie+Ziel eine Fahrt (bei vielen eine zweite: Äste), deren Verlauf.
   // Haltestellen nach dem Start: hin möglich, davor: zurück möglich.
+  // Schnell (seit 3.3): die Abfahrten bringen ihre Folgehalte mit (v6 fetchStops, Hbf ~0,3 s). Abends und nachts
+  // zusätzlich der nächste Mittag, sonst fehlen Tageslinien (Hbf 21:30: 419 statt ~610 Ziele).
+  // fetchStops ist laut API experimentell — fehlt nextStops, gilt der alte Weg über die Fahrtverläufe.
+  // Linien je Ziel nur aus der Fahrtrichtung Start -> Ziel (der alte Weg mischte beide Richtungen).
   function erreichbar(start, fortschritt, fertig) {
     if (cacheErreichbar[start.id]) return fertig(null, cacheErreichbar[start.id]);
+    var h = (new Date().getUTCHours() + 2) % 24, zeiten = [null];
+    if (h >= 20 || h < 6) zeiten.push(morgenMittag());
+    var offen = zeiten.length, alle = [], fehler = null, ohneHalte = false;
+    zeiten.forEach(function (zeit) {
+      holen('v6/stoptimes?n=150&window=7200&fetchStops=true&stopId=' + encodeURIComponent(start.id) + (zeit ? '&time=' + zeit : ''), function (f, d) {
+        var st = (!f && d && d.stopTimes) || [];
+        if (f) fehler = f;
+        else if (st.length && !st.some(function (x) { return x.nextStops; })) ohneHalte = true;
+        alle = alle.concat(st);
+        if (--offen) return;
+        if (fehler || ohneHalte || !alle.length) {
+          console.log('Ziele: schneller Weg ' + (fehler || 'ohne Folgehalte') + ', nehme Fahrtverläufe');
+          return erreichbarAlt(start, fortschritt, fertig);
+        }
+        var erg = { linien: {}, ziele: {} };
+        alle.forEach(function (x) {
+          if (!oepnv(x) || (x.place && x.place.pickupType === 'NOT_ALLOWED')) return;   // Endhalt: nur Ausstieg
+          var halte = x.nextStops || [];
+          if (!halte.length) return;
+          erg.linien[x.routeShortName] = 1;
+          halte.forEach(function (hh) {
+            if (hh.name === start.name || hh.name === x.place.name) return;
+            var z = erg.ziele[hh.name] || (erg.ziele[hh.name] = { name: hh.name, id: hh.stopId, lat: hh.lat, lon: hh.lon, linien: {}, hin: false, rueck: false });
+            z.linien[x.routeShortName] = 1;
+            z.hin = true;
+          });
+        });
+        cacheErreichbar[start.id] = erg;
+        fertig(null, erg);
+      });
+    });
+  }
+
+  function erreichbarAlt(start, fortschritt, fertig) {
     holen('v1/stoptimes?n=300&stopId=' + encodeURIComponent(start.id), function (f, d) {
       if (f) return fertig(f);
       var muster = {}, liste = [];
-      (d.stopTimes || []).forEach(function (x) {
+      (d.stopTimes || []).filter(oepnv).forEach(function (x) {
         var k = x.routeShortName + '|' + x.headsign;
         (muster[k] = muster[k] || []).push(x);
       });
@@ -179,8 +223,7 @@ function Logik(holenRoh, schrift) {
           var h = halte[j];
           if (j === ab || h.name === start.name || h.name === x.place.name) continue;
           var z = erg.ziele[h.name] || (erg.ziele[h.name] = { name: h.name, id: h.stopId, lat: h.lat, lon: h.lon, linien: {}, hin: false, rueck: false });
-          z.linien[x.routeShortName] = 1;
-          if (j > ab) z.hin = true; else z.rueck = true;
+          if (j > ab) { z.hin = true; z.linien[x.routeShortName] = 1; } else z.rueck = true;   // Linien nur in Fahrtrichtung
         }
       }
       var aufgaben = liste.map(function (x) {
@@ -213,49 +256,122 @@ function Logik(holenRoh, schrift) {
       var l = {};
       (d.itineraries || []).forEach(function (it) {
         var fa = it.legs.filter(function (x) { return x.mode !== 'WALK'; });
-        if (fa.length === 1) l[fa[0].routeShortName] = 1;
+        if (fa.length === 1 && oepnv(fa[0])) l[fa[0].routeShortName] = 1;
       });
       fertig(null, Object.keys(l).sort(sortDe));
     });
   }
 
-  // Rückfahrt: Ziel selbst und Haltestellen bis 2 km darum, die 20 nächsten, nur mit Direktverbindung zum Start.
-  //   a, b     Start und Ziel ({id, name, lat, lon})
-  //   extra    optional {linien: [...], rueck: bool} — selten fahrende Linien vom Ziel zurück (aus erreichbar)
-  //   fertig(fehler, liste)  liste: [{id, name, m, lat, lon, linien}] nach Entfernung, nur mit Linien
-  function rueckSuchen(a, b, extra, fortschritt, fertig) {
-    haltestellenUm(b.lat, b.lon, UMKREIS_RUECK, function (f, um) {
-      var kand = [{ id: b.id, name: b.name, m: 0, lat: b.lat, lon: b.lon }];
-      if (!f) um.forEach(function (t) {
-        if (namensSchluessel(t.name) === namensSchluessel(a.name) || namensSchluessel(t.name) === namensSchluessel(b.name)) return;
-        kand.push(t);
+  // ---------- Rückfahrt (seit 3.3): Fahrten, die am Start A oder in seinem Umkreis ankommen ----------
+  // Ankünfte an allen Haltestellen im Kreis um A (v6/stoptimes mit radius, zwei Zeitfenster: jetzt und morgen
+  // Mittag, sonst fehlen abends die Tageslinien), je Linie+Endhalt+Richtung ein Fahrtverlauf. Hängt nicht vom
+  // Ziel ab: einmal je A und Umkreis laden, die Liste für jedes Ziel entsteht dann lokal (rueckKandidaten).
+  function morgenMittag() {            // ~12:30 deutscher Zeit, genau genug für ein Stundenfenster
+    return new Date(Date.now() + 86400000).toISOString().substring(0, 10) + 'T10:30:00Z';
+  }
+
+  function ankunftUm(a, radius, fortschritt, fertig) {
+    var k = a.id + '|' + radius, c = cacheAnkunft[k];
+    if (c && c.fertig) return fertig(c.f, c.erg);
+    if (c) { c.warten.push(fertig); if (fortschritt) c.fortschritt = fortschritt; return; }   // läuft schon (vorgeladen)
+    c = cacheAnkunft[k] = { fertig: false, warten: [fertig], fortschritt: fortschritt };
+    function ende(f, erg) {
+      c.fertig = true; c.f = f; c.erg = erg;
+      if (f) delete cacheAnkunft[k];   // Fehler nicht merken, nächster Versuch fragt neu
+      var w = c.warten; c.warten = [];
+      w.forEach(function (cb) { cb(f, erg); });
+    }
+    // Abdeckung: je Linie+Endhalt+Richtung UND Ankunftshaltestelle mindestens eine Fahrt. Nur Linie+Endhalt reicht
+    // nicht — manche Linien fahren mit gleichem Endhalt in zwei Varianten über verschiedene Halte.
+    var abdeckung = {}, alle = {}, offen = 2, fehler = null;
+    function abfrage(zeit) {
+      holen('v6/stoptimes?stopId=' + encodeURIComponent(a.id) + (a.lat !== undefined ? '&center=' + a.lat + ',' + a.lon : '') +
+            '&radius=' + radius + '&exactRadius=true&arriveBy=true&direction=LATER&window=3600&n=50' +
+            (zeit ? '&time=' + zeit : ''), function (f, d) {
+        if (f) fehler = f;
+        else (d.stopTimes || []).filter(oepnv).forEach(function (x) {
+          var key = x.routeShortName + '|' + (x.tripTo && x.tripTo.name) + '|' + x.directionId + '|' + namensSchluessel(x.place.name);
+          var t = abdeckung[x.tripId] || (abdeckung[x.tripId] = { linie: x.routeShortName, tripId: x.tripId, keys: {}, n: 0 });
+          if (!t.keys[key]) { t.keys[key] = 1; t.n++; }
+          alle[key] = 1;
+        });
+        if (--offen) return;
+        // gierig: Fahrten mit den meisten Haltestellen zuerst, jede nur, wenn sie etwas Neues abdeckt
+        var liste = [];
+        Object.keys(abdeckung).map(function (k2) { return abdeckung[k2]; }).sort(function (x, y) { return y.n - x.n; }).forEach(function (t) {
+          var neu = Object.keys(t.keys).filter(function (k3) { return alle[k3]; });
+          if (!neu.length) return;
+          neu.forEach(function (k3) { delete alle[k3]; });
+          liste.push(t);
+        });
+        if (!liste.length && fehler) return ende(fehler);
+        var erg = [];
+        nacheinander(liste.map(function (m) {
+          return function (weiter) {
+            holen('v1/trip?tripId=' + encodeURIComponent(m.tripId), function (f2, t) {
+              var leg = !f2 && t && t.legs && t.legs[0];
+              if (leg) erg.push({ linie: m.linie, halte: [leg.from].concat(leg.intermediateStops || [], [leg.to]).map(function (h) {
+                return { name: h.name, id: h.stopId, lat: h.lat, lon: h.lon };
+              }) });
+              weiter();
+            });
+          };
+        }), function (n, g) { if (c.fortschritt) c.fortschritt(n, g); }, function () { ende(null, erg); });
       });
-      kand = kand.slice(0, MAX_RUECK);
-      var fehler = 0, letzter = null;
-      var aufgaben = kand.map(function (k) {
-        return function (weiter) {
-          direkt(k.id, a.id, function (f2, l) {
-            if (f2) { fehler++; letzter = f2; }
-            k.linien = f2 ? [] : l;
-            if (k.m === 0 && extra && extra.rueck) (extra.linien || []).forEach(function (x) { if (k.linien.indexOf(x) < 0) k.linien.push(x); });
-            k.linien.sort(sortDe);
-            weiter();
-          });
-        };
-      });
-      nacheinander(aufgaben, fortschritt, function () {
-        if (fehler === kand.length) return fertig(letzter);   // keine einzige Antwort: Fehler statt leerer Liste
-        fertig(null, kand.filter(function (x) { return x.linien.length; }).sort(function (x, y) { return x.m - y.m; }));
-      });
+    }
+    abfrage(null);
+    abfrage(morgenMittag());
+  }
+
+  // Rückfahrt-Kandidaten: Einstieg C bis 2 km um b, auf derselben Fahrt vor dem Ausstieg D.
+  //   umkreis  0 = genau A (gleicher Name oder bis 150 m: zweite Datenquelle, anderer Steig), sonst Meter um A
+  //   Ergebnis [{id, name, lat, lon, m, ziel, linien[], ziele[]}] nach Entfernung von b;
+  //   ziele: [{id, name, lat, lon, m, start, linien[]}] — Ausstiege, A selbst zuerst, sonst nach Entfernung zu A
+  function rueckKandidaten(fahrten, a, b, umkreis) {
+    var ka = namensSchluessel(a.name), kb = namensSchluessel(b.name), je = {};
+    function istA(h) { return namensSchluessel(h.name) === ka || entfernung(a.lat, a.lon, h.lat, h.lon) <= GENAU_M; }
+    (fahrten || []).forEach(function (f) {
+      var h = f.halte;
+      for (var j = 1; j < h.length; j++) {
+        var d = h[j], dA = entfernung(a.lat, a.lon, d.lat, d.lon), start = istA(d), kd = namensSchluessel(d.name);
+        if (umkreis ? !(dA <= umkreis) && !start : !start) continue;
+        for (var i = 0; i < j; i++) {
+          var c = h[i], kc = namensSchluessel(c.name);
+          if (kc === kd || istA(c)) continue;
+          var m = kc === kb ? 0 : entfernung(b.lat, b.lon, c.lat, c.lon);
+          if (!(m <= UMKREIS_B)) continue;
+          var e = je[kc];
+          if (!e || m < e.m) {
+            var alt = e;
+            e = je[kc] = { id: c.id, name: c.name, lat: c.lat, lon: c.lon, m: m, ziel: kc === kb,
+                           linien: alt ? alt.linien : {}, ziele: alt ? alt.ziele : {} };
+          }
+          e.linien[f.linie] = 1;
+          var z = e.ziele[kd];
+          if (!z || dA < z.m) {
+            var altz = z;
+            z = e.ziele[kd] = { id: d.id, name: d.name, lat: d.lat, lon: d.lon, m: start ? 0 : dA, start: start, linien: altz ? altz.linien : {} };
+          }
+          z.linien[f.linie] = 1;
+        }
+      }
     });
+    return Object.keys(je).map(function (kc) {
+      var e = je[kc];
+      e.linien = Object.keys(e.linien).sort(sortDe);
+      e.ziele = Object.keys(e.ziele).map(function (kd) {
+        var z = e.ziele[kd]; z.linien = Object.keys(z.linien).sort(sortDe); return z;
+      }).sort(function (x, y) { return (y.start - x.start) || (x.m - y.m); });
+      return e;
+    }).sort(function (x, y) { return x.m - y.m; });
   }
 
   return {
-    COLS: COLS, UMKREIS_RUECK: UMKREIS_RUECK, MAX_RUECK: MAX_RUECK,
+    COLS: COLS, UMKREIS_B: UMKREIS_B, GENAU_R: GENAU_R, UMKREISE: UMKREISE,
     sortDe: sortDe, entfernung: entfernung, ledText: ledText, breite: breite, stadtVon: stadtVon, kurzname: kurzname,
-    klarname: klarname, utf8Kuerzen: utf8Kuerzen,
+    klarname: klarname, utf8Kuerzen: utf8Kuerzen, oepnv: oepnv,
     haltestellenUm: haltestellenUm, naechsteHaltestellen: naechsteHaltestellen,
-    erreichbar: erreichbar, zieleHin: zieleHin, direkt: direkt, rueckSuchen: rueckSuchen
+    erreichbar: erreichbar, zieleHin: zieleHin, direkt: direkt, ankunftUm: ankunftUm, rueckKandidaten: rueckKandidaten
   };
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = Logik;

@@ -42,7 +42,7 @@ var Pebble = {
     if (m['L_LADE'] !== undefined) uhr.lade.push(m['L_LADE']);
     if (m['ANZAHL'] !== undefined) {
       uhr.liste = null;
-      uhr.einrichtung = { anzahl: m['ANZAHL'], seite: m['SEITE'], namen: [] };
+      uhr.einrichtung = { anzahl: m['ANZAHL'], seite: m['SEITE'], umkreis: m['UMKREIS'], namen: [] };
       for (var i = 0; i < m['ANZAHL']; i++) uhr.einrichtung.namen.push(m['NAME_A[' + i + ']'] + ' / ' + m['NAME_B[' + i + ']']);
     }
     if (m['HIN[0]'] !== undefined || m['STATUS'] !== undefined && m['ANZAHL'] === undefined) uhr.abfahrten.push(m);
@@ -95,7 +95,7 @@ console.log('== 1 Neue Fahrt ab Hbf, Linie 4, Rückfahrt nein -> Liste');
 dann(function (w) { aktion(1); w(); });
 erwarte('START', /^HAUPTBAHNHOF/);
 erwarte('LINIE', /^4$/);
-erwarte('ZIEL', /^LUISENPLATZ$/);
+erwarte('ZIEL', /^RHEINSTR/);
 erwarte('ZURUECK AB ZIEL?', /^NEIN$/);
 erwarte('RUECKFAHRT AB', /M$/, function () { if (uhr.liste.texte.some(function (t) { return /\(ZIEL\)/.test(t); })) { console.log('FEHLER: Ziel trotz Nein angeboten'); process.exit(1); } });
 einrichtungDa(1);
@@ -113,6 +113,20 @@ console.log('== 3 Fahrt ändern -> Rückfahrt (Ziel angeboten)');
 dann(function (w) { aktion(2, 0); w(); });
 erwarte('RUECKFAHRT AB', /\(ZIEL\)/);
 einrichtungDa(1);
+console.log('== 3b Fahrt ändern -> Rückfahrt -> Umkreis bewusst gewählt -> Einstieg -> Ausstieg (nicht am Start)');
+dann(function (w) { aktion(2, 0); w(); });
+erwarte('RUECKFAHRT AB', /^UMKREIS 1KM$/);
+erwarte(/^EINSTIEG 1KM$/, /./);
+erwarte('AUSSTIEG', /M$/, function () { if (!/\(START\)$/.test(uhr.liste.texte[0])) console.log('  Hinweis: Start nicht erster Ausstieg (von hier fährt nichts genau zum Start)'); });
+einrichtungDa(1);
+dann(function (w) { var st = strecken()[0]; if (!st.d) { console.log('FEHLER: Ausstieg d nicht gespeichert'); process.exit(1); } console.log('  Rückfahrt ' + st.c.kurz + ' -> ' + st.d.kurz); w(); });
+dann(function (w) { warte(function () { var a = uhr.abfahrten[uhr.abfahrten.length - 1]; return a && a['RUECK_L[0]'] !== undefined; }, function () { var a = uhr.abfahrten[uhr.abfahrten.length - 1]; console.log('  Abfahrten zurück: ' + [0, 1, 2].map(function (j) { return a['RUECK_L[' + j + ']'] + '@' + (a['RUECK[' + j + ']'] ? new Date(a['RUECK[' + j + ']'] * 1000).toISOString().substring(11, 16) + 'Z' : '-'); }).join(' ') + ' (' + a.QUELLE + ')'); w(); }); });
+console.log('== 3c Umkreis an der Uhr auf 2 km, Rückfahrt-Liste bietet 2KM an, Zurück');
+dann(function (w) { aktion(8, 2000); setTimeout(function () { if (speicher.umkreis !== '2000') { console.log('FEHLER: Umkreis nicht gespeichert'); process.exit(1); } w(); }, 50); });
+dann(function (w) { aktion(2, 0); w(); });
+erwarte('RUECKFAHRT AB', null, function () { if (uhr.liste.texte.indexOf('UMKREIS 2KM') < 0) { console.log('FEHLER: UMKREIS 2KM fehlt'); process.exit(1); } });
+dann(function (w) { var e0 = uhr.ende; aktion(6); warte(function () { return uhr.ende > e0; }, function () { console.log('  Zurück -> Uhr-Menü'); w(); }); });
+dann(function (w) { aktion(8, 1000); w(); });
 console.log('== 4 Neue Fahrt ab Hbf, alle Linien, Buchstabe K, Rückfahrt ja');
 dann(function (w) { aktion(1); w(); });
 erwarte('START', /^HAUPTBAHNHOF/);
@@ -134,6 +148,7 @@ einrichtungDa(1);
 function fertig() {
   console.log('Lade-Meldungen: ' + uhr.lade.length + ' (z. B. ' + uhr.lade.slice(0, 6).join(', ') + ')');
   console.log('Größte Nachricht: ' + uhr.groesste + ' Bytes (Puffer Uhr 2048)');
+  console.log('Umkreis in der Einrichtung: ' + (uhr.einrichtung && uhr.einrichtung.umkreis));
   console.log('Abfragen: ' + X.zaehler.n + ' | Dauer: ' + Math.round((Date.now() - t0) / 1000) + ' s');
   process.exit(0);
 }

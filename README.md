@@ -6,11 +6,18 @@ A Pebble watchapp that shows the next buses for your own routes, in local time f
 no matter which time zone the watch is in. It started as a display for bus line 8 in Wiesbaden — hence the
 name — and now handles any line and any pair of stops in the RMV area (Rhein-Main), with real-time delays.
 
+## What it is for
+
+**A fixed trip there and back, without changing.** For example into town and home again: you know your
+start, you know where you are going, and you want to see at a glance when the next buses leave — in both
+directions. Commuters and regulars, not trip planning: there is no journey planner and no connections with
+transfers. Every route is a pair of stops served by at least one line directly.
+
 Made together by **Seb & Claude** (Anthropic): ideas, design decisions and real-world testing by Seb,
 code, tests and documentation by Claude in pair-programming sessions.
 
-> **Status:** version 3.2 (watch menu, two views, platforms) is tested in the emery emulator and with Node tests against
-> live data. Earlier versions run on a real Pebble Time 2.
+> **Status:** version 3.3 (return trip with a radius around the start, faster destination list) is tested in the
+> emery emulator and with Node tests against live data. Earlier versions run on a real Pebble Time 2.
 
 <p>
   <img src="docs/images/display-led.png" width="200" alt="LED view">
@@ -33,6 +40,10 @@ and minutes until departure — with the delay included.*
   (A to D) you know where to wait. Real-time platform changes from RMV are taken into account. LED view:
   small and dimmed right after the line number, so `16 D` is not read as a line "16D"; Klar view: a small
   dark box below the delay
+- **Return trip that fits how you move.** Board anywhere within 2 km of your destination (stroll through town
+  first). By default the way back ends **exactly at your start**. Only if you choose it, the app also looks for
+  buses that end within 500 m, 1 km or 2 km of the start — and then you pick the stop to get off yourself
+  (the supermarket round the corner instead of your door). Nothing is widened automatically
 - **Two views**, switchable on the phone or on the watch: LED (default) and Klar
 - **Set up routes right on the watch** — long-press Select opens a menu:
   new route from the stops near you, change the return stop or the start, delete. The phone does the
@@ -68,10 +79,20 @@ and minutes until departure — with the delay included.*
 2. **Line** — all lines from that stop, or *all lines*
 3. **Destination** — alphabetical, only stops *after* the start. With more than 40 destinations (busy
    stations) you pick the first letter first
-4. **Return from destination?** — asked only if there is a direct connection back from the destination
-5. **Return stop** — otherwise: stops within 2 km of the destination with a direct connection back,
-   sorted by distance
-6. Saved, short names are generated automatically
+4. **Return from destination?** — asked only if a bus goes from the destination directly back to the start
+5. **Return stop** — otherwise: stops within 2 km of the destination with a direct connection back to
+   exactly the start, sorted by distance. At the end of the list: *Umkreis 1 km* and *ohne Rückfahrt*
+6. **Only if you choose *Umkreis*:** stops within 2 km of the destination whose bus ends within the radius
+   around the start, then **where to get off** — the start first, otherwise sorted by distance to the start.
+   You always confirm this step. Nothing found: a larger radius is offered
+7. Saved, short names are generated automatically. The watch always queries exactly the saved pair of stops
+
+### Radius around the start
+
+- Phone: Pebble app → Linie 8 → settings → *Umkreis für die Rückfahrt* → 500 m, 1 km (default) or 2 km
+- Watch: long-press Select → *Einstellungen* → *Umkreis*
+
+The radius is only a search aid while setting up a route. It never changes a saved route.
 
 ### Switching the view
 
@@ -175,6 +196,15 @@ tools/                      build script, preview renderer, generators, tests
 - **Watch menu:** the main menu and settings live on the watch; everything else (stop lists, lines,
   destinations, return stops) is computed by the phone and sent in blocks of 10 entries
 - **Nearby stops:** Transitous `map/stops` (all stops in a bounding box), grouped by name
+- **Destinations:** one Transitous `v6/stoptimes` request with `fetchStops=true` — departures come with their
+  following stops (Wiesbaden Hbf: ~600 destinations in 0.2 s instead of up to 120 trip requests). In the evening
+  a second window for the next midday adds daytime lines. `fetchStops` is marked experimental; if it disappears,
+  the old way via trip requests takes over
+- **Return trip:** arrivals at all stops within the radius around the start (`v6/stoptimes` with `radius` and
+  `arriveBy`, two time windows), then one trip per line, terminus, direction *and* arrival stop — enough trips
+  to cover every stop in the radius. Every stop *before* the arrival stop within 2 km of the destination is a
+  candidate. This depends only on the start, so it is loaded in the background while you pick line and
+  destination; the list for any destination is then computed locally in milliseconds
 - **Messages** are sent strictly one after another with acknowledgement; the watch inbox is 2 KB because a
   full setup with 8 routes and names in both spellings is about 1.3 KB
 
@@ -187,6 +217,10 @@ tools/                      build script, preview renderer, generators, tests
 | An exception inside a callback of the phone script fails silently, the watch waits forever | callbacks wrapped in `try/catch`, error shown as a list on the watch |
 | Transitous rate-limits bursts (HTTP 429) | at most 4 requests in parallel, retry after 1/2/4 s |
 | Transitous returns 403 without a User-Agent | send one |
+| Transitous also lists car-pooling offers (mode `RIDE_SHARING`, no line name) | filtered out everywhere |
+| One trip per line and terminus misses stops: some lines run two variants via different stops with the same terminus | one trip per line, terminus, direction and arrival stop, chosen greedily so few trips cover all |
+| `arriveBy=true` in `stoptimes` searches backwards in time | add `direction=LATER` |
+| Destinations per line mixed both directions (a stop reached by line 16 showed up under line 4, which only runs the other way) | lines per destination only from departures in travel direction |
 | RMV does not allow browser requests (CORS) | all RMV calls from the phone script, not from the settings page |
 | Inverted text in the LED raster is hard to read | selected row bright with an arrow, other rows dimmed |
 | Umlauts cut in half at the buffer limit | truncate by UTF-8 bytes on the phone |
