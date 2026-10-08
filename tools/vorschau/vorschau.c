@@ -1,4 +1,5 @@
 // Rendert das Display von main.c in eine Rohdatei (200x228 RGB) und prüft die Zeitumrechnung.
+// Ansicht: LAYOUT=0 (LED), 1 (Klar, ohne Text), 2 (Phosphor). Fahrtdauer: DAUER="14,12,0,13,0,0".
 // Uhr-Menü: MODUS=menue|aendern|liste|lade, dazu TITEL, EINTRAEGE="A|B|C", SEL (Index), LAUF (Lauftext-Versatz), LADETEXT
 #define main pebble_main
 #include "../../src/c/main.c"
@@ -39,8 +40,14 @@ int main(int argc, char **argv) {
     char *tok = strtok(tmp, ","); 
     for (int i = 0; i < 6 && tok; i++, tok = strtok(NULL, ",")) s->del[i / 3][i % 3] = atoi(tok);
   }
+  if (getenv("DAUER")) {                       // DAUER="14,12,0,13,0,0": Fahrtdauer hin1..3, rück1..3
+    char tmp[64]; strncpy(tmp, getenv("DAUER"), 63); tmp[63] = 0;
+    char *tok = strtok(tmp, ",");
+    for (int i = 0; i < 6 && tok; i++, tok = strtok(NULL, ",")) s->dur[i / 3][i % 3] = atoi(tok);
+  }
   strcpy(s->name[0], argc > 18 ? argv[18] : "HAUPTBAHNHOF");
   strcpy(s->name[1], argc > 19 ? argv[19] : "LUISENPLATZ");
+  if (getenv("LAYOUT")) s_layout = atoi(getenv("LAYOUT"));
   const char *mod = getenv("MODUS");
   if (mod) {
     if (!strcmp(mod, "menue")) menue_zeigen();

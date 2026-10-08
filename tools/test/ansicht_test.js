@@ -62,6 +62,13 @@ pruefe(e[keys.NAME_A] === 'HAUPTBAHNHOF', 'Handy: LED-Namen unverändert');
 lauscher.appmessage({ payload: { AKTION: 7, WAHL: 0 } });
 await warte();
 pruefe(speicher.layout === 'led', 'Handy: Umschalten an der Uhr (AKTION 7) gespeichert');
+lauscher.appmessage({ payload: { AKTION: 7, WAHL: 2 } });
+await warte();
+pruefe(speicher.layout === 'phosphor', 'Handy: Phosphor an der Uhr (AKTION 7, WAHL 2) gespeichert');
+gesendet = []; lauscher.ready();
+await warte();
+pruefe(gesendet[0][keys.LAYOUT] === 2, 'Handy: Einrichtung mit LAYOUT = 2 (Phosphor)');
+pruefe(gesendet[0][keys.NAME_A] === 'HAUPTBAHNHOF', 'Handy: Phosphor nutzt LED-Namen');
 // Größte Einrichtung: 8 Strecken, lange Namen in beiden Schreibweisen
 var lang = { id: 'z', name: 'Wiesbaden Schwalbacher Straße/LuisenForum Süd Übergang', kurz: 'SCHWALBACHER STR./LUISENFORUM SU' };
 speicher.strecken = JSON.stringify([0, 1, 2, 3, 4, 5, 6, 7].map(function () { return { a: lang, b: lang, c: lang, linien: [], alle: true }; }));

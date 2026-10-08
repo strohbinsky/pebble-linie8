@@ -69,7 +69,7 @@ function holen(von, nach, linien, fertig) {
   var xhr = new XMLHttpRequest();
   xhr.open('GET', url, true);
   // Transitous lehnt Anfragen ohne User-Agent mit 403 ab.
-  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/3.3 (privat)'); } catch (e) {}
+  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/3.4 (privat)'); } catch (e) {}
   xhr.onload = function () {
     if (xhr.status !== 200) { console.log('HTTP ' + xhr.status); return ende(STATUS_FEHLER); }
     try {
@@ -82,7 +82,9 @@ function holen(von, nach, linien, fertig) {
         var t = Math.floor(Date.parse(f.startTime) / 1000), k = t + '|' + f.routeShortName;
         if (gesehen[k]) return;
         gesehen[k] = true;
-        liste.push({ t: t, l: linienKurz(f.routeShortName), d: 0, s: steigText(f.from && (f.from.track || f.from.scheduledTrack)) });
+        // Fahrtdauer bis zum Ziel in Minuten (Transitous: nur Fahrplan)
+        var an = Math.floor(Date.parse(f.endTime) / 1000), dauer = an > t ? Math.round((an - t) / 60) : 0;
+        liste.push({ t: t, l: linienKurz(f.routeShortName), d: 0, s: steigText(f.from && (f.from.track || f.from.scheduledTrack)), f: dauer });
         live = live || !!f.realTime;
       });
       liste.sort(function (a, b) { return a.t - b.t; });
@@ -178,7 +180,13 @@ function holenRmv(von, nach, linien, fertig) {
             var d = (l.cancelled || o.cancelled) ? AUSFALL : Math.round((t - plan) / 60);
             // Steig: Echtzeit vor Fahrplan (RMV meldet Steigwechsel als rtTrack)
             var steig = o.rtTrack || o.track || (o.rtPlatform && o.rtPlatform.text) || (o.platform && o.platform.text);
-            liste.push({ t: t, l: linienKurz(name), d: d, s: steigText(steig) });
+            // Fahrtdauer bis zum Ziel: Ankunft minus Abfahrt, beide mit Echtzeit, wo vorhanden
+            var z = l.Destination || {}, dauer = 0;
+            if (z.time) {
+              var an = z.rtTime ? deZuUtc(z.rtDate || z.date, z.rtTime) : deZuUtc(z.date, z.time);
+              if (an > t) dauer = Math.round((an - t) / 60);
+            }
+            liste.push({ t: t, l: linienKurz(name), d: d, s: steigText(steig), f: dauer });
             live = live || rt;
           });
           liste.sort(function (x, y) { return x.t - y.t; });
@@ -205,15 +213,17 @@ function umkreis() {
 }
 function umkreisText(m) { return m >= 1000 ? (m / 1000) + T('KM', ' km') : m + T('M', ' m'); }
 
-// Ansicht: 'led' (Standard) oder 'klar'. Einstellbar am Handy (Seite) und an der Uhr (Menü Einstellungen).
-function layout() { return localStorage.getItem('layout') === 'klar' ? 'klar' : 'led'; }
+// Ansicht: 'led' (Standard), 'klar' oder 'phosphor'. Einstellbar am Handy (Seite) und an der Uhr (Menü Einstellungen).
+// Phosphor nutzt die LED-Texte (Großbuchstaben ohne Umlaute), nur Klar die normale Schreibweise.
+var LAYOUTS = ['led', 'klar', 'phosphor'];   // Index = LAYOUT/WAHL an der Uhr
+function layout() { var v = localStorage.getItem('layout'); return LAYOUTS.indexOf(v) >= 0 ? v : 'led'; }
 function T(led, klar) { return layout() === 'klar' ? klar : led; }   // Text je nach Ansicht
 
 function einrichtungSenden() {
   var liste = strecken(), msg = {};
   msg[keys.ANZAHL] = liste.length;
   msg[keys.SEITE] = aktiveSeite();
-  msg[keys.LAYOUT] = layout() === 'klar' ? 1 : 0;
+  msg[keys.LAYOUT] = LAYOUTS.indexOf(layout());
   msg[keys.UMKREIS] = umkreis();
   for (var i = 0; i < liste.length && i < MAXS; i++) {
     var c = rueckStart(liste[i]), stadt = L.stadtVon(liste[i].a.name);
@@ -230,13 +240,14 @@ function einrichtungSenden() {
 function richtungenLaden(st, quelle, fertig) {
   var linien = st.alle ? null : st.linien;
   var msg = {}, offen = 2, fehler = null, live = true;
-  function eintragen(t, l, v, st, erg) {
+  function eintragen(t, l, v, st, fd, erg) {
     for (var j = 0; j < MAXD; j++) {
       var f = erg.fahrten[j];
       msg[t + j] = f ? f.t : 0;
       msg[l + j] = f ? f.l : '';
       msg[v + j] = f ? f.d : 0;
       msg[st + j] = f ? (f.s || '') : '';
+      msg[fd + j] = f ? (f.f || 0) : 0;
     }
     live = live && erg.live;
   }
@@ -251,13 +262,13 @@ function richtungenLaden(st, quelle, fertig) {
     if (quelle === 'RMV') holenRmv(von, nach, linien, cb); else holen(von.id, nach.id, linien, cb);
   }
   abfrage(st.a, st.b, function (f, erg) {
-    if (f !== null) fehler = f; else eintragen(keys.HIN, keys.HIN_L, keys.HIN_D, keys.HIN_S, erg);
+    if (f !== null) fehler = f; else eintragen(keys.HIN, keys.HIN_L, keys.HIN_D, keys.HIN_S, keys.HIN_F, erg);
     eins();
   });
   var c = rueckStart(st);
-  if (!c) { eintragen(keys.RUECK, keys.RUECK_L, keys.RUECK_D, keys.RUECK_S, { fahrten: [], live: true }); eins(); return; }
+  if (!c) { eintragen(keys.RUECK, keys.RUECK_L, keys.RUECK_D, keys.RUECK_S, keys.RUECK_F, { fahrten: [], live: true }); eins(); return; }
   abfrage(c, rueckZiel(st), function (f, erg) {
-    if (f !== null) fehler = f; else eintragen(keys.RUECK, keys.RUECK_L, keys.RUECK_D, keys.RUECK_S, erg);
+    if (f !== null) fehler = f; else eintragen(keys.RUECK, keys.RUECK_L, keys.RUECK_D, keys.RUECK_S, keys.RUECK_F, erg);
     eins();
   });
 }
@@ -321,7 +332,7 @@ function transitousHolen(pfad, fertig) {
   function ende(f, d) { if (!erledigt) { erledigt = true; fertig(f, d); } }
   var xhr = new XMLHttpRequest();
   xhr.open('GET', 'https://api.transitous.org/api/' + pfad, true);
-  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/3.3 (privat)'); } catch (e) {}
+  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/3.4 (privat)'); } catch (e) {}
   xhr.onload = function () {
     if (xhr.status !== 200) return ende('HTTP ' + xhr.status);
     try { ende(null, JSON.parse(xhr.responseText)); } catch (e) { ende('Antwort unlesbar'); }
@@ -658,7 +669,7 @@ function menueAktion2(aktion, wahl) {
   console.log('Menü: Aktion ' + aktion + ' Wahl ' + wahl);
   if (aktion === A_LOESCHEN) return loeschen(wahl);
   if (aktion === A_LAYOUT) {             // an der Uhr umgeschaltet: merken, damit Seite und Listen passen
-    localStorage.setItem('layout', wahl === 1 ? 'klar' : 'led');
+    localStorage.setItem('layout', LAYOUTS[wahl] || 'led');
     console.log('Menü: Ansicht ' + layout());
     return;
   }
@@ -727,7 +738,7 @@ Pebble.addEventListener('webviewclosed', function (e) {
     var daten = JSON.parse(decodeURIComponent(e.response));
     if (!daten.strecken) return;                      // Abbrechen
     if (daten.rmvKey !== undefined) localStorage.setItem('rmvKey', String(daten.rmvKey).trim());
-    if (daten.layout === 'klar' || daten.layout === 'led') localStorage.setItem('layout', daten.layout);
+    if (LAYOUTS.indexOf(daten.layout) >= 0) localStorage.setItem('layout', daten.layout);
     if (L.UMKREISE.indexOf(daten.umkreis) >= 0) localStorage.setItem('umkreis', String(daten.umkreis));
     ablauf = null;
     localStorage.setItem('strecken', JSON.stringify(daten.strecken.slice(0, MAXS)));

@@ -16,18 +16,22 @@ transfers. Every route is a pair of stops served by at least one line directly.
 Made together by **Seb & Claude** (Anthropic): ideas, design decisions and real-world testing by Seb,
 code, tests and documentation by Claude in pair-programming sessions.
 
-> **Status:** version 3.3 (return trip with a radius around the start, faster destination list) is tested in the
-> emery emulator and with Node tests against live data. Earlier versions run on a real Pebble Time 2.
+> **Status:** version 3.4 (third view "Phosphor", travel time to the destination for every departure) is tested
+> in the emery emulator and with Node tests against live data. Earlier versions run on a real Pebble Time 2.
 
 <p>
   <img src="docs/images/display-led.png" width="200" alt="LED view">
   &nbsp;
   <img src="docs/images/display-klar.png" width="200" alt="Klar view">
+  &nbsp;
+  <img src="docs/images/display-phosphor.png" width="200" alt="Phosphor view">
 </p>
 
-*Left: the default **LED view**, styled like a dot-matrix display at a bus stop. Right: the alternative
-**Klar view** ("clear") with system fonts on white. Same data: line, platform, scheduled time, delay (`+1`)
-and minutes until departure — with the delay included.*
+*Left: the default **LED view**, styled like a dot-matrix display at a bus stop. Middle: **Klar** ("clear")
+with system fonts on white. Right: **Phosphor**, radar green on black in a pixel font. Same data: line,
+platform, scheduled time, delay (`+1'`), travel time to the destination (`7'`) and minutes until departure
+(`3'`) — with the delay included. The scheduled time stays as printed in the timetable; **the minutes until
+departure are the number to go by**.*
 
 ## Features
 
@@ -44,7 +48,12 @@ and minutes until departure — with the delay included.*
   first). By default the way back ends **exactly at your start**. Only if you choose it, the app also looks for
   buses that end within 500 m, 1 km or 2 km of the start — and then you pick the stop to get off yourself
   (the supermarket round the corner instead of your door). Nothing is widened automatically
-- **Two views**, switchable on the phone or on the watch: LED (default) and Klar
+- **Travel time to the destination** for every departure (`7'`), from real-time arrival minus real-time
+  departure where available. Shown small next to the departure; the delay is coloured (LED: bright), the
+  travel time grey (LED: dimmed). If space runs out, the travel time goes first — in the LED view that means
+  it mostly shows only for buses on time
+- **Minutes with a tick everywhere:** `13'` until departure, `+1'` delay, `7'` travel time
+- **Three views**, switchable on the phone or on the watch: LED (default), Klar and Phosphor
 - **Set up routes right on the watch** — long-press Select opens a menu:
   new route from the stops near you, change the return stop or the start, delete. The phone does the
   searching, the watch only shows lists
@@ -66,6 +75,7 @@ and minutes until departure — with the delay included.*
 <p>
   <img src="docs/images/menu-led.png" width="200" alt="Menu, LED view">
   <img src="docs/images/menu-klar.png" width="200" alt="Menu, Klar view">
+  <img src="docs/images/menu-phosphor.png" width="200" alt="Menu, Phosphor view">
   <img src="docs/images/change-klar.png" width="200" alt="Change route">
   <img src="docs/images/return-stops-klar.png" width="200" alt="Return stops near the destination">
 </p>
@@ -96,12 +106,13 @@ The radius is only a search aid while setting up a route. It never changes a sav
 
 ### Switching the view
 
-- Phone: Pebble app → Linie 8 → settings → *Ansicht auf der Uhr* → LED or Klar
-- Watch: long-press Select → *Einstellungen* → *Ansicht* → LED or Klar
+- Phone: Pebble app → Linie 8 → settings → *Ansicht auf der Uhr* → LED, Klar or Phosphor
+- Watch: long-press Select → *Einstellungen* → *Ansicht* → LED, Klar or Phosphor
 
 <p>
   <img src="docs/images/view-led.png" width="200" alt="View selection, LED">
   <img src="docs/images/view-klar.png" width="200" alt="View selection, Klar">
+  <img src="docs/images/view-phosphor.png" width="200" alt="View selection, Phosphor">
 </p>
 
 The watch remembers the view itself, so it starts in the right one even before the phone answers.
@@ -159,8 +170,9 @@ The script builds in `~/.local/share/linie8-build/`, so no `build/` folder appea
 ### Preview without the SDK
 
 `tools/vorschau/` contains a minimal stand-in for `pebble.h`. It compiles `src/c/main.c` on the Mac and
-renders the LED view as a PNG in seconds — layout bugs show up here before the emulator. (The Klar view
-uses system fonts and is checked in the emulator.)
+renders the LED and Phosphor views as a PNG in seconds — layout bugs show up here before the emulator.
+(The Klar view uses system fonts and is checked in the emulator.) Environment variables: `LAYOUT=0|2`,
+`VERSP`, `DAUER` (travel time), `STEIG`, `MODUS` for menus.
 
 ```bash
 cd tools/vorschau && cc -I. -o /tmp/l8vorschau vorschau.c
@@ -182,7 +194,7 @@ runs on Transitous only. Example routes are around Wiesbaden Hauptbahnhof.
 ## How it works
 
 ```
-src/c/main.c                watch: LED raster, Klar view, menu and lists, time zone, buttons, AppMessage
+src/c/main.c                watch: LED raster, Klar and Phosphor views, menu and lists, time zone, buttons, AppMessage
 src/c/led_font.h            generated LED font (tools/schrift_erzeugen.py)
 src/pkjs/index.js           phone: routes, RMV/Transitous queries, message queue, menu state machine
 src/pkjs/logik.js           shared by phone script and settings page: nearby stops, reachable destinations,
@@ -192,7 +204,8 @@ tools/                      build script, preview renderer, generators, tests
 ```
 
 - **Departures:** a journey search *start → destination with zero transfers* returns exactly the buses
-  that stop at both stops. The platform comes with it: RMV `Origin.rtTrack`/`track`, Transitous `from.track`. Times travel as Unix seconds (UTC); the watch converts to Wiesbaden time
+  that stop at both stops. The platform comes with it: RMV `Origin.rtTrack`/`track`, Transitous `from.track`. Travel time: RMV
+  `Destination.rtTime`/`time`, Transitous `endTime`, each minus the departure. Times travel as Unix seconds (UTC); the watch converts to Wiesbaden time
 - **Watch menu:** the main menu and settings live on the watch; everything else (stop lists, lines,
   destinations, return stops) is computed by the phone and sent in blocks of 10 entries
 - **Nearby stops:** Transitous `map/stops` (all stops in a bounding box), grouped by name

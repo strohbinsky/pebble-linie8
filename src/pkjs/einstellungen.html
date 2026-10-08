@@ -50,7 +50,7 @@ var ansicht = 'liste';             // 'liste' oder 'editor'
 var e = null;                      // Entwurf der Strecke im Editor
 var rmvKey = (ZUSTAND && ZUSTAND.rmvKey) || '';
 var rmvTest = '';
-var layout = (ZUSTAND && ZUSTAND.layout) === 'klar' ? 'klar' : 'led';   // Ansicht auf der Uhr
+var layout = ['klar', 'phosphor'].indexOf(ZUSTAND && ZUSTAND.layout) >= 0 ? ZUSTAND.layout : 'led';   // Ansicht auf der Uhr
 var umkreisWert = L.UMKREISE.indexOf(ZUSTAND && ZUSTAND.umkreis) >= 0 ? ZUSTAND.umkreis : 1000;   // Umkreis um den Start
 function kmText(m) { return m >= 1000 ? (m / 1000) + ' km' : m + ' m'; }
 
@@ -119,7 +119,8 @@ function zeigeListe() {
     '<button data-a="rmvTest">Schlüssel prüfen</button><div class="klein" id="rmvErg">' + esc(rmvTest) + '</div>';
   h += '<h2>Ansicht auf der Uhr</h2>' +
     [['led', 'LED-Haltestellenanzeige', 'Standard. Orange Punkte auf Schwarz, wie am Bahnsteig'],
-     ['klar', 'Klar', 'Weiß, Systemschrift, Linie als rotes Kästchen, Namen mit Umlauten']].map(function (v) {
+     ['klar', 'Klar', 'Weiß, Systemschrift, Linie als rotes Kästchen, Namen mit Umlauten'],
+     ['phosphor', 'Phosphor', 'Radar-Grün auf Schwarz, Pixelschrift wie das Watchface Phosphor']].map(function (v) {
       return '<label class="zeile"><input type="radio" name="layout" data-a="layout" value="' + v[0] + '"' + (layout === v[0] ? ' checked' : '') + '>' +
         '<b>' + v[1] + '</b><br><span class="klein">' + v[2] + '</span></label>';
     }).join('') +
@@ -503,7 +504,7 @@ document.addEventListener('click', function (ev) {
   if (a === 'loeschen') { if (confirm('Strecke löschen?')) { strecken.splice(i, 1); } return zeigeListe(); }
   if (a === 'hoch' && i > 0) { strecken.splice(i - 1, 0, strecken.splice(i, 1)[0]); return zeigeListe(); }
   if (a === 'runter' && i < strecken.length - 1) { strecken.splice(i + 1, 0, strecken.splice(i, 1)[0]); return zeigeListe(); }
-  if (a === 'layout') { layout = el.value === 'klar' ? 'klar' : 'led'; return; }
+  if (a === 'layout') { layout = ['klar', 'phosphor'].indexOf(el.value) >= 0 ? el.value : 'led'; return; }
   if (a === 'speichern') return schliessen({ strecken: strecken, rmvKey: rmvKey, layout: layout, umkreis: umkreisWert });
   if (a === 'rmvTest') return rmvPruefen();
   if (a === 'abbrechen') return schliessen({ abbruch: true });
