@@ -69,7 +69,7 @@ function holen(von, nach, linien, fertig) {
   var xhr = new XMLHttpRequest();
   xhr.open('GET', url, true);
   // Transitous lehnt Anfragen ohne User-Agent mit 403 ab.
-  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/0.35 (privat)'); } catch (e) {}
+  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/0.36 (privat)'); } catch (e) {}
   xhr.onload = function () {
     if (xhr.status !== 200) { console.log('HTTP ' + xhr.status); return ende(STATUS_FEHLER); }
     try {
@@ -159,7 +159,10 @@ function holenRmv(von, nach, linien, fertig) {
     if (f1 !== null) return fertig(f1);
     rmvKennung(nach, function (f2, b) {
       if (f2 !== null) return fertig(f2);
-      rmvGet('trip?maxChange=0&numF=6&originExtId=' + encodeURIComponent(a) + '&destExtId=' + encodeURIComponent(b), function (f, d) {
+      // Linie gleich bei RMV filtern: ohne Filter sind die 6 Fahrten an großen Haltestellen oft fremde Linien,
+      // die gewählte fehlt dann ganz (Hbf -> CongressCenter: 1 von 6 ist eine 4). Unbekannte Linie -> HTTP 400 -> Fehler.
+      var filter = (linien && linien.length) ? '&lines=' + encodeURIComponent(linien.join(',')) : '';
+      rmvGet('trip?maxChange=0&numF=6' + filter + '&originExtId=' + encodeURIComponent(a) + '&destExtId=' + encodeURIComponent(b), function (f, d) {
         if (f !== null) return fertig(f);
         try {
           var liste = [], live = false, gesehen = {};
@@ -288,10 +291,15 @@ function richtungenLaden(st, quelle, fertig) {
 
 // Auto: RMV, wenn ein Schlüssel hinterlegt ist; schlägt RMV fehl, die ganze Strecke aus Transitous.
 // Nur RMV / nur Transitous: kein Wechsel, ein Fehler wird als Fehler gezeigt.
+// Jeder Aufruf macht den vorigen ungültig (ladeNr): wird während einer Abfrage die Quelle oder Seite gewechselt,
+// darf die alte Antwort nicht mehr an die Uhr — sonst zeigt sie RMV, obwohl gerade Transitous gewählt wurde.
+var ladeNr = 0;
 function streckeLaden(i) {
   var st = strecken()[i];
   if (!st) return;
+  var nr = ++ladeNr;
   function senden2(msg, quelle) {
+    if (nr !== ladeNr) { console.log('Abfrage ' + nr + ' (' + quelle + ') veraltet, verworfen'); return; }
     msg[keys.SEITE] = i;
     msg[keys.QUELLE] = quelle;
     msg[keys.STAND] = Math.floor(Date.now() / 1000);
@@ -350,7 +358,7 @@ function transitousHolen(pfad, fertig) {
   function ende(f, d) { if (!erledigt) { erledigt = true; fertig(f, d); } }
   var xhr = new XMLHttpRequest();
   xhr.open('GET', 'https://api.transitous.org/api/' + pfad, true);
-  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/0.35 (privat)'); } catch (e) {}
+  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/0.36 (privat)'); } catch (e) {}
   xhr.onload = function () {
     if (xhr.status !== 200) return ende('HTTP ' + xhr.status);
     try { ende(null, JSON.parse(xhr.responseText)); } catch (e) { ende('Antwort unlesbar'); }

@@ -16,7 +16,7 @@ transfers. Every route is a pair of stops served by at least one line directly.
 Made together by **Seb & Claude** (Anthropic): ideas, design decisions and real-world testing by Seb,
 code, tests and documentation by Claude in pair-programming sessions.
 
-> **Status: beta, version 0.35.** Not yet tested in daily use — only in the emery emulator and with Node tests
+> **Status: beta, version 0.36.** Not yet tested in daily use — only in the emery emulator and with Node tests
 > against live data. Version numbers start with 0 until the app has proven itself on the street. Releases
 > published earlier as 3.2.0 to 3.4.0 are the same line of development (now 0.32 to 0.34).
 
