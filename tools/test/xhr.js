@@ -1,7 +1,7 @@
 // XMLHttpRequest-Nachbau für Node (fetch), nur GET — für die Testskripte. Schlüssel nie ausgeben: URLs werden gefiltert.
 var zaehler = { n: 0 };
 function maske(u) { return String(u).replace(/accessId=[^&]*/, 'accessId=***'); }
-function XMLHttpRequest() { this.kopf = { 'User-Agent': 'pebble-linie8/3.0 test (privat)' }; }
+function XMLHttpRequest() { this.kopf = { 'User-Agent': 'pebble-linie8/0.30 test (privat)' }; }
 XMLHttpRequest.prototype.open = function (m, u) { this.url = u; };
 XMLHttpRequest.prototype.setRequestHeader = function (k, v) { this.kopf[k] = v; };
 XMLHttpRequest.prototype.send = function () {

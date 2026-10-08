@@ -156,7 +156,7 @@ function Logik(holenRoh, schrift) {
   // ---------- Erreichbare Ziele ab einem Start ----------
   // Abfahrtsliste am Start, je Muster Linie+Ziel eine Fahrt (bei vielen eine zweite: Äste), deren Verlauf.
   // Haltestellen nach dem Start: hin möglich, davor: zurück möglich.
-  // Schnell (seit 3.3): die Abfahrten bringen ihre Folgehalte mit (v6 fetchStops, Hbf ~0,3 s). Abends und nachts
+  // Schnell (seit 0.33): die Abfahrten bringen ihre Folgehalte mit (v6 fetchStops, Hbf ~0,3 s). Abends und nachts
   // zusätzlich der nächste Mittag, sonst fehlen Tageslinien (Hbf 21:30: 419 statt ~610 Ziele).
   // fetchStops ist laut API experimentell — fehlt nextStops, gilt der alte Weg über die Fahrtverläufe.
   // Linien je Ziel nur aus der Fahrtrichtung Start -> Ziel (der alte Weg mischte beide Richtungen).
@@ -176,10 +176,10 @@ function Logik(holenRoh, schrift) {
           console.log('Ziele: schneller Weg ' + (fehler || 'ohne Folgehalte') + ', nehme Fahrtverläufe');
           return erreichbarAlt(start, fortschritt, fertig);
         }
-        var erg = { linien: {}, ziele: {} };
+        var erg = { linien: {}, ziele: {}, fahrten: {} };
         alle.forEach(function (x) {
           if (!oepnv(x) || (x.place && x.place.pickupType === 'NOT_ALLOWED')) return;   // Endhalt: nur Ausstieg
-          var halte = x.nextStops || [];
+          var halte = x.nextStops || [], namen = [];
           if (!halte.length) return;
           erg.linien[x.routeShortName] = 1;
           halte.forEach(function (hh) {
@@ -187,7 +187,9 @@ function Logik(holenRoh, schrift) {
             var z = erg.ziele[hh.name] || (erg.ziele[hh.name] = { name: hh.name, id: hh.stopId, lat: hh.lat, lon: hh.lon, linien: {}, hin: false, rueck: false });
             z.linien[x.routeShortName] = 1;
             z.hin = true;
+            namen.push(hh.name);
           });
+          fahrtMerken(erg, x, namen);
         });
         cacheErreichbar[start.id] = erg;
         fertig(null, erg);
@@ -209,7 +211,7 @@ function Logik(holenRoh, schrift) {
         if (a.length >= 4) liste.push(a[Math.floor(a.length / 2)]);
       });
       liste = liste.slice(0, 120);
-      var erg = { linien: {}, ziele: {} };
+      var erg = { linien: {}, ziele: {}, fahrten: {} };
       function auswerten(t, x) {
         var leg = t.legs && t.legs[0];
         if (!leg) return;
@@ -219,12 +221,14 @@ function Logik(holenRoh, schrift) {
         if (ab < 0) for (j = 0; j < halte.length; j++) if (halte[j].name === x.place.name) { ab = j; break; }
         if (ab < 0) return;
         erg.linien[x.routeShortName] = 1;
+        var namen = [];
         for (j = 0; j < halte.length; j++) {
           var h = halte[j];
           if (j === ab || h.name === start.name || h.name === x.place.name) continue;
           var z = erg.ziele[h.name] || (erg.ziele[h.name] = { name: h.name, id: h.stopId, lat: h.lat, lon: h.lon, linien: {}, hin: false, rueck: false });
-          if (j > ab) { z.hin = true; z.linien[x.routeShortName] = 1; } else z.rueck = true;   // Linien nur in Fahrtrichtung
+          if (j > ab) { z.hin = true; z.linien[x.routeShortName] = 1; namen.push(h.name); } else z.rueck = true;   // Linien nur in Fahrtrichtung
         }
+        fahrtMerken(erg, x, namen);
       }
       var aufgaben = liste.map(function (x) {
         return function (weiter) {
@@ -248,6 +252,52 @@ function Logik(holenRoh, schrift) {
     });
   }
 
+  // ---------- Richtungen einer Linie (seit 0.35) ----------
+  // Je Abfahrt der Verlauf ab dem Start: Linie, Endhalt, Halte in Fahrtreihenfolge — gleiche Verläufe einmal.
+  function fahrtMerken(erg, x, namen) {
+    var gesehen = {}, folge = namen.filter(function (n) { return gesehen[n] ? false : (gesehen[n] = true); });
+    if (!folge.length) return;
+    var endhalt = x.headsign || (x.tripTo && x.tripTo.name) || folge[folge.length - 1];
+    var k = x.routeShortName + '|' + endhalt + '|' + folge.join('>');
+    var f = erg.fahrten[k] || (erg.fahrten[k] = { linie: x.routeShortName, endhalt: endhalt, halte: folge, n: 0 });
+    f.n++;
+  }
+
+  function teilfolge(a, b) {               // a steckt in b, gleiche Reihenfolge, Lücken erlaubt
+    var j = 0;
+    for (var i = 0; i < b.length && j < a.length; i++) if (b[i] === a[j]) j++;
+    return j === a.length;
+  }
+
+  // Richtungen einer Linie ab dem Start: je Endhalt eine. Fährt die Linie zum selben Endhalt auf verschiedenen
+  // Wegen (8 nach Eigenheim über Dambachtal oder über R.-Schumann-Schule), je Weg eine, mit "ueber" = erster
+  // Halt, den nur dieser Weg hat. Kürzere Verläufe, die ganz in einem längeren stecken, gehen darin auf.
+  // Ergebnis: [{ endhalt, ueber, n, ziele: [Ziel-Objekte wie in zieleHin, in Fahrtreihenfolge] }]
+  function richtungen(erg, linie) {
+    var je = {}, aus = [];
+    Object.keys(erg.fahrten || {}).forEach(function (k) {
+      var f = erg.fahrten[k];
+      if (f.linie === linie) (je[f.endhalt] = je[f.endhalt] || []).push(f);
+    });
+    Object.keys(je).forEach(function (endhalt) {
+      var wege = [];
+      je[endhalt].sort(function (x, y) { return (y.halte.length - x.halte.length) || (y.n - x.n); }).forEach(function (w) {
+        var drin = wege.filter(function (b) { return teilfolge(w.halte, b.halte); })[0];
+        if (drin) drin.n += w.n; else wege.push({ halte: w.halte, n: w.n });
+      });
+      wege.forEach(function (w) {
+        var andere = wege.filter(function (x) { return x !== w; }), ueber = null;
+        if (andere.length) {
+          ueber = w.halte.filter(function (h) { return andere.every(function (x) { return x.halte.indexOf(h) < 0; }); })[0] ||
+                  w.halte.filter(function (h) { return andere.some(function (x) { return x.halte.indexOf(h) < 0; }); })[0] || null;
+        }
+        aus.push({ endhalt: endhalt, ueber: ueber, n: w.n,
+                   ziele: w.halte.map(function (n) { return erg.ziele[n]; }).filter(function (z) { return z && z.hin; }) });
+      });
+    });
+    return aus.sort(function (x, y) { return sortDe(x.endhalt, y.endhalt) || sortDe(x.ueber || '', y.ueber || ''); });
+  }
+
   // ---------- Direktverbindungen ----------
   function direkt(von, nach, fertig) {             // Linien mit Direktverbindung, wie auf der Uhr
     holen('v5/plan?maxTransfers=0&numItineraries=10&directModes=WALK&maxPreTransitTime=0&maxPostTransitTime=0' +
@@ -262,7 +312,7 @@ function Logik(holenRoh, schrift) {
     });
   }
 
-  // ---------- Rückfahrt (seit 3.3): Fahrten, die am Start A oder in seinem Umkreis ankommen ----------
+  // ---------- Rückfahrt (seit 0.33): Fahrten, die am Start A oder in seinem Umkreis ankommen ----------
   // Ankünfte an allen Haltestellen im Kreis um A (v6/stoptimes mit radius, zwei Zeitfenster: jetzt und morgen
   // Mittag, sonst fehlen abends die Tageslinien), je Linie+Endhalt+Richtung ein Fahrtverlauf. Hängt nicht vom
   // Ziel ab: einmal je A und Umkreis laden, die Liste für jedes Ziel entsteht dann lokal (rueckKandidaten).
@@ -371,7 +421,7 @@ function Logik(holenRoh, schrift) {
     sortDe: sortDe, entfernung: entfernung, ledText: ledText, breite: breite, stadtVon: stadtVon, kurzname: kurzname,
     klarname: klarname, utf8Kuerzen: utf8Kuerzen, oepnv: oepnv,
     haltestellenUm: haltestellenUm, naechsteHaltestellen: naechsteHaltestellen,
-    erreichbar: erreichbar, zieleHin: zieleHin, direkt: direkt, ankunftUm: ankunftUm, rueckKandidaten: rueckKandidaten
+    erreichbar: erreichbar, zieleHin: zieleHin, richtungen: richtungen, direkt: direkt, ankunftUm: ankunftUm, rueckKandidaten: rueckKandidaten
   };
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = Logik;

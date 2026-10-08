@@ -60,7 +60,7 @@ def breite(text, font, scale=1):
 # Platzprüfung gegen das 66 Punkte breite Raster
 for t, f, s in [("88:88", F57, 2), ("8  88:88", F57, 1), ("PL DER DT EINHEIT", F35, 1), ("KEIN NETZ", F35, 1),
                 ("SELECT LANG:", F35, 1), ("NEUE FAHRT", F35, 1), ("SOLL 88:88", F35, 1),
-                # Uhr-Menü (Version 3.0): Titel und feste Einträge, Text ab x=2 bis 63
+                # Uhr-Menü (Version 0.30): Titel und feste Einträge, Text ab x=2 bis 63
                 ("ZURUECK AB ZIEL?", F35, 1), ("FAHRT 8 AENDERN", F35, 1), ("FAHRT 8 LOESCHEN", F35, 1),
                 ("RUECKFAHRT AB", F35, 1), ("OHNE RUECKFAHRT", F35, 1), ("NICHTS GEFUNDEN", F35, 1),
                 ("KEIN STANDORT", F35, 1), ("KEINE ANTWORT", F35, 1), ("FAHRTEN 120/120", F35, 1), ("SUCHE 20/20", F35, 1)]:

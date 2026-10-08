@@ -6,7 +6,7 @@
 // Fehler Transitous (MOTIS, nur Sollfahrplan). In beiden Fällen Verbindungssuche Start -> Ziel ohne Umstieg:
 // liefert genau die Fahrten, die an BEIDEN Haltestellen halten — damit sind geteilte Linien erledigt.
 //
-// Uhr-Menü (Version 3.0): Strecken direkt an der Uhr anlegen, ändern, löschen. Der Ablauf ist ein
+// Uhr-Menü (Version 0.30): Strecken direkt an der Uhr anlegen, ändern, löschen. Der Ablauf ist ein
 // Zustandsautomat hier im Handy-Skript (siehe "Uhr-Menü" unten); die Uhr zeigt nur Listen und meldet die Wahl.
 
 var keys = require('message_keys');
@@ -69,7 +69,7 @@ function holen(von, nach, linien, fertig) {
   var xhr = new XMLHttpRequest();
   xhr.open('GET', url, true);
   // Transitous lehnt Anfragen ohne User-Agent mit 403 ab.
-  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/3.4 (privat)'); } catch (e) {}
+  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/0.35 (privat)'); } catch (e) {}
   xhr.onload = function () {
     if (xhr.status !== 200) { console.log('HTTP ' + xhr.status); return ende(STATUS_FEHLER); }
     try {
@@ -203,7 +203,7 @@ function holenRmv(von, nach, linien, fertig) {
 // ---------- An die Uhr ----------
 // Rückfahrt startet an c (eigene Haltestelle nahe dem Ziel); ältere Einrichtungen ohne c: am Ziel b.
 function rueckStart(st) { return st.ohneRueck ? null : (st.c || st.b); }
-// Rückfahrt endet an d (bewusst gewählter Ausstieg im Umkreis um A, seit 3.3); ohne d genau am Start a.
+// Rückfahrt endet an d (bewusst gewählter Ausstieg im Umkreis um A, seit 0.33); ohne d genau am Start a.
 function rueckZiel(st) { return st.d || st.a; }
 
 // Umkreis um den Start für die Rückfahrt-Suche: 500 / 1000 / 2000 m, Standard 1000. Uhr-Menü und Seite.
@@ -219,12 +219,25 @@ var LAYOUTS = ['led', 'klar', 'phosphor'];   // Index = LAYOUT/WAHL an der Uhr
 function layout() { var v = localStorage.getItem('layout'); return LAYOUTS.indexOf(v) >= 0 ? v : 'led'; }
 function T(led, klar) { return layout() === 'klar' ? klar : led; }   // Text je nach Ansicht
 
+// Quelle der Abfahrten (seit 0.35): 'auto' (Standard: RMV mit Schlüssel, bei Fehler Transitous), 'rmv' (nur RMV,
+// Fehler bleibt Fehler — auch ohne Schlüssel), 'trans' (nur Transitous). Einstellbar an Seite und Uhr.
+var QUELLEN = ['auto', 'rmv', 'trans'];   // Index = QUELLWAHL/WAHL an der Uhr
+function quelle() { var v = localStorage.getItem('quelle'); return QUELLEN.indexOf(v) >= 0 ? v : 'auto'; }
+
+// Anzeige der Abfahrten (seit 0.35), umgesetzt auf der Uhr — das Handy merkt sich die Werte nur für Seite und Einrichtung.
+// abfahrt: 'plan' (Standard, Fahrplanzeit + Verspätung als +2') oder 'aktuell' (Zeit mit Verspätung). dauer: 'an' (Standard) / 'aus'.
+function abfahrt() { return localStorage.getItem('abfahrt') === 'aktuell' ? 'aktuell' : 'plan'; }
+function dauer() { return localStorage.getItem('dauer') === 'aus' ? 'aus' : 'an'; }
+
 function einrichtungSenden() {
   var liste = strecken(), msg = {};
   msg[keys.ANZAHL] = liste.length;
   msg[keys.SEITE] = aktiveSeite();
   msg[keys.LAYOUT] = LAYOUTS.indexOf(layout());
   msg[keys.UMKREIS] = umkreis();
+  msg[keys.QUELLWAHL] = QUELLEN.indexOf(quelle());
+  msg[keys.ABFAHRT] = abfahrt() === 'aktuell' ? 1 : 0;
+  msg[keys.DAUER] = dauer() === 'an' ? 1 : 0;
   for (var i = 0; i < liste.length && i < MAXS; i++) {
     var c = rueckStart(liste[i]), stadt = L.stadtVon(liste[i].a.name);
     msg[keys.NAME_A + i] = liste[i].a.kurz;
@@ -273,7 +286,8 @@ function richtungenLaden(st, quelle, fertig) {
   });
 }
 
-// RMV, wenn ein Schlüssel hinterlegt ist; schlägt RMV fehl, die ganze Strecke aus Transitous.
+// Auto: RMV, wenn ein Schlüssel hinterlegt ist; schlägt RMV fehl, die ganze Strecke aus Transitous.
+// Nur RMV / nur Transitous: kein Wechsel, ein Fehler wird als Fehler gezeigt.
 function streckeLaden(i) {
   var st = strecken()[i];
   if (!st) return;
@@ -290,9 +304,13 @@ function streckeLaden(i) {
       senden2(m, 'TRANS');
     });
   }
-  if (!rmvSchluessel()) return transitous();
+  function fehlerRmv(fehler) { var m = {}; m[keys.STATUS] = fehler; senden2(m, 'RMV'); }
+  var q = quelle();
+  if (q === 'trans' || (q === 'auto' && !rmvSchluessel())) return transitous();
+  if (!rmvSchluessel()) { console.log('Quelle nur RMV, aber kein Schlüssel'); return fehlerRmv(STATUS_FEHLER); }
   richtungenLaden(st, 'RMV', function (msg, fehler) {
     if (msg) return senden2(msg, 'RMV');
+    if (q === 'rmv') { console.log('RMV fehlgeschlagen (' + fehler + '), Quelle nur RMV'); return fehlerRmv(fehler); }
     console.log('RMV fehlgeschlagen (' + fehler + '), nehme Transitous');
     transitous();
   });
@@ -320,7 +338,7 @@ Pebble.addEventListener('appmessage', function (e) { // Select oder Blättern au
 // Uhr -> Handy: AKTION + WAHL. Handy -> Uhr: Liste (L_TITEL, L_ANZAHL, L_AB, L_TEXT[10]) in Blöcken zu 10,
 // Fortschritt L_LADE, L_ANZAHL = -1 heißt "Ablauf beendet, zurück ins Uhr-Menü".
 // Nach jeder Änderung: localStorage -> einrichtungSenden() -> streckeLaden() — dieselben Strecken wie am Handy.
-var A_NEU = 1, A_AENDERN_RUECK = 2, A_AENDERN_START = 3, A_LOESCHEN = 4, A_WAHL = 5, A_ZURUECK = 6, A_LAYOUT = 7, A_UMKREIS = 8;
+var A_NEU = 1, A_AENDERN_RUECK = 2, A_AENDERN_START = 3, A_LOESCHEN = 4, A_WAHL = 5, A_ZURUECK = 6, A_LAYOUT = 7, A_UMKREIS = 8, A_QUELLE = 9, A_ABFAHRT = 10, A_DAUER = 11;
 var BLOCK = 10;        // muss zu L_TEXT[10] in package.json passen
 var MAXL = 300;        // muss zu MAXL in main.c passen
 var LTXT = 31;         // Zeichen je Listeneintrag (Puffer 32 auf der Uhr)
@@ -332,7 +350,7 @@ function transitousHolen(pfad, fertig) {
   function ende(f, d) { if (!erledigt) { erledigt = true; fertig(f, d); } }
   var xhr = new XMLHttpRequest();
   xhr.open('GET', 'https://api.transitous.org/api/' + pfad, true);
-  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/3.4 (privat)'); } catch (e) {}
+  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/0.35 (privat)'); } catch (e) {}
   xhr.onload = function () {
     if (xhr.status !== 200) return ende('HTTP ' + xhr.status);
     try { ende(null, JSON.parse(xhr.responseText)); } catch (e) { ende('Antwort unlesbar'); }
@@ -459,9 +477,39 @@ function schrittLinie() {
     ablauf.erg = erg;
     schritt(T('LINIE', 'Linie'), [{ t: T('ALLE LINIEN', 'Alle Linien'), l: '*' }].concat(linien.map(function (l) { return { t: T(L.ledText(l), l), l: l }; })), function (x) {
       ablauf.linie = x.l;
-      schrittZiel();
+      if (x.l === '*') return schrittZiel();
+      schrittRichtung();
     });
   }));
+}
+
+// 2b. Richtung der gewählten Linie (seit 0.35): je Endhalt eine, bei verschiedenen Wegen "EIGENHEIM UEBER DAMBACHTAL".
+//     Danach die Ziele in Fahrtreihenfolge. Nur eine Richtung: gleich deren Ziele. Keine: wie bisher alphabetisch.
+function schrittRichtung() {
+  var stadt = L.stadtVon(ablauf.a.name), r = L.richtungen(ablauf.erg, ablauf.linie);
+  if (!r.length) return schrittZiel();
+  if (r.length === 1) return zielListe(zieleInFolge(r[0]));
+  var eintraege = r.map(function (x) {
+    var led = L.kurzname(x.endhalt, stadt) + (x.ueber ? ' UEBER ' + L.kurzname(x.ueber, stadt) : '');
+    var klar = L.klarname(x.endhalt, stadt) + (x.ueber ? ' über ' + L.klarname(x.ueber, stadt) : '');
+    return { t: T(led, klar), r: x };
+  });
+  eintraege.push({ t: T('ALLE HALTE A-Z', 'Alle Halte A-Z'), alle: true });
+  schritt(T('RICHTUNG', 'Richtung'), eintraege, function (x) {
+    if (x.alle) return schrittZiel();
+    zielListe(zieleInFolge(x.r));
+  });
+}
+
+function zieleInFolge(richtung) {       // Ziele einer Richtung, nächster Halt zuerst
+  var stadt = L.stadtVon(ablauf.a.name), gesehen = {}, eintraege = [];
+  richtung.ziele.forEach(function (z) {
+    var t = nameT(z.name, stadt);
+    if (gesehen[t]) return;
+    gesehen[t] = true;
+    eintraege.push({ t: t, z: z });
+  });
+  return eintraege;
 }
 
 // 3. Ziele alphabetisch, nur Hinweg, je nach Linie gefiltert
@@ -502,7 +550,7 @@ function nurLinie(liste) {              // gewählte Linie aus Schritt 2 (oder a
   return (!l || l === '*') ? liste : liste.filter(function (x) { return x === l; });
 }
 
-// Rückfahrt (seit 3.3). Grundsatz: Ankunft genau am Start A ist der Normalfall; der Umkreis um A gilt nur,
+// Rückfahrt (seit 0.33). Grundsatz: Ankunft genau am Start A ist der Normalfall; der Umkreis um A gilt nur,
 // wenn er bewusst gewählt wird — nie automatisch. Gespeichert und abgefragt wird immer genau c -> d (ohne d: A).
 // Daten: Fahrten, die an A (bzw. im Umkreis) ankommen — L.ankunftUm, vorgeladen sobald A feststeht.
 function vorladen(a) {
@@ -678,6 +726,18 @@ function menueAktion2(aktion, wahl) {
     console.log('Menü: Umkreis ' + umkreis());
     return;
   }
+  if (aktion === A_ABFAHRT || aktion === A_DAUER) {   // an der Uhr umgeschaltet, dort schon wirksam
+    if (aktion === A_ABFAHRT) localStorage.setItem('abfahrt', wahl ? 'aktuell' : 'plan');
+    else localStorage.setItem('dauer', wahl ? 'an' : 'aus');
+    console.log('Menü: Abfahrt ' + abfahrt() + ', Fahrtdauer ' + dauer());
+    return;
+  }
+  if (aktion === A_QUELLE) {             // an der Uhr gewählt: merken, aktuelle Strecke neu laden
+    localStorage.setItem('quelle', QUELLEN[wahl] || 'auto');
+    console.log('Menü: Quelle ' + quelle());
+    if (strecken().length) streckeLaden(aktiveSeite());
+    return;
+  }
   if (aktion === A_NEU || aktion === A_AENDERN_START) {
     ablauf = { ziel: aktion === A_NEU ? -1 : wahl, schritte: [], gen: 0, laedt: true };
     return schrittNah();
@@ -715,7 +775,7 @@ function menueAktion2(aktion, wahl) {
 // ---------- Einstellungen: eingebettete Seite ----------
 function seiteOeffnen(standort, standortFehler) {
   var zustand = { strecken: strecken(), standort: standort, standortFehler: standortFehler, schrift: SCHRIFT.F35,
-                  rmvKey: rmvSchluessel(), layout: layout(), umkreis: umkreis() };
+                  rmvKey: rmvSchluessel(), layout: layout(), umkreis: umkreis(), quelle: quelle(), abfahrt: abfahrt(), dauer: dauer() };
   var html = SEITE_HTML.replace('/*ZUSTAND*/null', function () { return JSON.stringify(zustand); });
   Pebble.openURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
 }
@@ -739,6 +799,9 @@ Pebble.addEventListener('webviewclosed', function (e) {
     if (!daten.strecken) return;                      // Abbrechen
     if (daten.rmvKey !== undefined) localStorage.setItem('rmvKey', String(daten.rmvKey).trim());
     if (LAYOUTS.indexOf(daten.layout) >= 0) localStorage.setItem('layout', daten.layout);
+    if (QUELLEN.indexOf(daten.quelle) >= 0) localStorage.setItem('quelle', daten.quelle);
+    if (daten.abfahrt === 'plan' || daten.abfahrt === 'aktuell') localStorage.setItem('abfahrt', daten.abfahrt);
+    if (daten.dauer === 'an' || daten.dauer === 'aus') localStorage.setItem('dauer', daten.dauer);
     if (L.UMKREISE.indexOf(daten.umkreis) >= 0) localStorage.setItem('umkreis', String(daten.umkreis));
     ablauf = null;
     localStorage.setItem('strecken', JSON.stringify(daten.strecken.slice(0, MAXS)));

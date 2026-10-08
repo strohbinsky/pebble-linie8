@@ -1,6 +1,7 @@
 // Rendert das Display von main.c in eine Rohdatei (200x228 RGB) und prüft die Zeitumrechnung.
-// Ansicht: LAYOUT=0 (LED), 1 (Klar, ohne Text), 2 (Phosphor). Fahrtdauer: DAUER="14,12,0,13,0,0".
-// Uhr-Menü: MODUS=menue|aendern|liste|lade, dazu TITEL, EINTRAEGE="A|B|C", SEL (Index), LAUF (Lauftext-Versatz), LADETEXT
+// Ansicht: LAYOUT=0 (LED), 1 (Klar, ohne Text), 2 (Phosphor). Fahrtdauer: DAUER="14,12,0,13,0,0", DAUERAUS=1 blendet sie aus.
+// Abfahrtszeit: ABFAHRT=1 = aktuell (mit Verspätung), sonst Fahrplan.
+// Uhr-Menü: MODUS=menue|aendern|einst|liste|lade (einst: SEL0 = vorausgewählter Eintrag), dazu TITEL, EINTRAEGE="A|B|C", SEL (Index), LAUF (Lauftext-Versatz), LADETEXT
 #define main pebble_main
 #include "../../src/c/main.c"
 #undef main
@@ -48,10 +49,13 @@ int main(int argc, char **argv) {
   strcpy(s->name[0], argc > 18 ? argv[18] : "HAUPTBAHNHOF");
   strcpy(s->name[1], argc > 19 ? argv[19] : "LUISENPLATZ");
   if (getenv("LAYOUT")) s_layout = atoi(getenv("LAYOUT"));
+  if (getenv("ABFAHRT")) s_abfahrt = atoi(getenv("ABFAHRT"));   // 1 = aktuell (Zeit mit Verspätung)
+  if (getenv("DAUERAUS")) s_dauer = false;                       // Fahrtdauer ausgeblendet
   const char *mod = getenv("MODUS");
   if (mod) {
     if (!strcmp(mod, "menue")) menue_zeigen();
     else if (!strcmp(mod, "aendern")) aendern_zeigen();
+    else if (!strcmp(mod, "einst")) einstellungen_zeigen(getenv("SEL0") ? atoi(getenv("SEL0")) : 0);
     else {
       liste_beginnen(L_HANDY, getenv("TITEL") ? getenv("TITEL") : "");
       char tmp[4096]; strncpy(tmp, getenv("EINTRAEGE") ? getenv("EINTRAEGE") : "", sizeof tmp - 1); tmp[sizeof tmp - 1] = 0;

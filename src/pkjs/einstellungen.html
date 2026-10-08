@@ -52,6 +52,9 @@ var rmvKey = (ZUSTAND && ZUSTAND.rmvKey) || '';
 var rmvTest = '';
 var layout = ['klar', 'phosphor'].indexOf(ZUSTAND && ZUSTAND.layout) >= 0 ? ZUSTAND.layout : 'led';   // Ansicht auf der Uhr
 var umkreisWert = L.UMKREISE.indexOf(ZUSTAND && ZUSTAND.umkreis) >= 0 ? ZUSTAND.umkreis : 1000;   // Umkreis um den Start
+var abfahrtWert = (ZUSTAND && ZUSTAND.abfahrt) === 'aktuell' ? 'aktuell' : 'plan';   // Abfahrtszeit auf der Uhr
+var dauerWert = (ZUSTAND && ZUSTAND.dauer) === 'aus' ? 'aus' : 'an';                // Fahrtdauer auf der Uhr
+var quelleWert = ['rmv', 'trans'].indexOf(ZUSTAND && ZUSTAND.quelle) >= 0 ? ZUSTAND.quelle : 'auto';   // Quelle der Abfahrten
 function kmText(m) { return m >= 1000 ? (m / 1000) + ' km' : m + ' m'; }
 
 // ---------- Hilfsfunktionen ----------
@@ -112,19 +115,35 @@ function zeigeListe() {
       '<button class="klein" data-a="loeschen" data-i="' + i + '">Löschen</button></div>';
   });
   if (strecken.length < MAXS) h += '<button data-a="neu">+ Strecke hinzufügen</button>';
-  h += '<h2>Datenquelle</h2><div class="klein">Optional: eigener RMV-Schlüssel (accessId, kostenlos bei RMV Open Data). ' +
-    'Mit Schlüssel kommen die Abfahrten vom RMV, mit Echtzeit; klappt das nicht, von Transitous (nur Fahrplan). ' +
-    'Auf der Uhr steht unten RMV oder TRANS vor der Uhrzeit.</div>' +
-    '<input type="text" id="rmvKey" placeholder="RMV-Schlüssel (leer = nur Transitous)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" value="' + esc(rmvKey) + '">' +
-    '<button data-a="rmvTest">Schlüssel prüfen</button><div class="klein" id="rmvErg">' + esc(rmvTest) + '</div>';
-  h += '<h2>Ansicht auf der Uhr</h2>' +
+  // Reihenfolge wie im Uhr-Menü Einstellungen: Anzeige, Datenquelle, Rückfahrt-Suche
+  h += '<h2>Anzeige auf der Uhr</h2><h3>Ansicht</h3>' +
     [['led', 'LED-Haltestellenanzeige', 'Standard. Orange Punkte auf Schwarz, wie am Bahnsteig'],
      ['klar', 'Klar', 'Weiß, Systemschrift, Linie als rotes Kästchen, Namen mit Umlauten'],
      ['phosphor', 'Phosphor', 'Radar-Grün auf Schwarz, Pixelschrift wie das Watchface Phosphor']].map(function (v) {
       return '<label class="zeile"><input type="radio" name="layout" data-a="layout" value="' + v[0] + '"' + (layout === v[0] ? ' checked' : '') + '>' +
         '<b>' + v[1] + '</b><br><span class="klein">' + v[2] + '</span></label>';
     }).join('') +
-    '<div class="klein">Auch an der Uhr umschaltbar: Select lang → Einstellungen → Ansicht.</div>';
+    '<h3>Abfahrtszeit</h3>' +
+    [['plan', 'Fahrplan', 'Standard. Planzeit, Verspätung klein dahinter (+2\')'],
+     ['aktuell', 'Aktuell', 'Zeit mit Verspätung; in Klar orange, in Phosphor gelb. Restminuten zählen immer mit Verspätung']].map(function (v) {
+      return '<label class="zeile"><input type="radio" name="abfahrt" data-a="abfahrtWert" value="' + v[0] + '"' + (abfahrtWert === v[0] ? ' checked' : '') + '>' +
+        '<b>' + v[1] + '</b><br><span class="klein">' + v[2] + '</span></label>';
+    }).join('') +
+    '<h3>Fahrtdauer</h3>' +
+    '<label class="zeile"><input type="checkbox" data-a="dauerWert"' + (dauerWert === 'an' ? ' checked' : '') + '>' +
+    '<b>Fahrtdauer zum Ziel zeigen</b><br><span class="klein">Standard an. Minuten je Abfahrt, gedimmt; entfällt ohnehin, wenn kein Platz ist</span></label>' +
+    '<div class="klein">Alles auch an der Uhr: Select lang → Einstellungen.</div>';
+  h += '<h2>Datenquelle</h2><div class="klein">Optional: eigener RMV-Schlüssel (accessId, kostenlos bei RMV Open Data). ' +
+    'Mit Schlüssel kommen die Abfahrten vom RMV, mit Echtzeit; klappt das nicht, von Transitous (nur Fahrplan). ' +
+    'Auf der Uhr steht unten RMV oder TRANS vor der Uhrzeit.</div>' +
+    '<input type="text" id="rmvKey" placeholder="RMV-Schlüssel (leer = nur Transitous)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" value="' + esc(rmvKey) + '">' +
+    '<button data-a="rmvTest">Schlüssel prüfen</button><div class="klein" id="rmvErg">' + esc(rmvTest) + '</div>' +
+    [['auto', 'Auto', 'RMV mit Schlüssel, bei Fehler Transitous'],
+     ['rmv', 'Nur RMV', 'kein Wechsel — ohne Schlüssel oder bei Störung steht FEHLER auf der Uhr'],
+     ['trans', 'Nur Transitous', 'nur Fahrplan, schont das RMV-Kontingent']].map(function (v) {
+      return '<label class="zeile"><input type="radio" name="quelle" data-a="quelleWert" value="' + v[0] + '"' + (quelleWert === v[0] ? ' checked' : '') + '>' +
+        '<span><b>' + v[1] + '</b> <span class="klein">' + v[2] + '</span></span></label>';
+    }).join('');
   h += '<h2>Umkreis für die Rückfahrt</h2><div class="klein">Normal endet die Rückfahrt genau am Start. Fährt von dort nichts, ' +
     'kannst du beim Einrichten bewusst nach Ankunft im Umkreis um den Start suchen — so weit läufst du dann höchstens.</div>' +
     L.UMKREISE.map(function (m) {
@@ -158,6 +177,7 @@ function rmvPruefen() {
 function neuerEntwurf(s) {
   e = s ? JSON.parse(JSON.stringify(s)) : { a: null, b: null, alle: true, linien: [] };
   e.wahlLinie = null;              // Schritt 2: null = noch offen, '*' = alle Linien
+  e.wahlRichtung = null;           // Schritt 2b: null = noch offen, -1 = alle Halte A-Z, sonst Index in L.richtungen
   e.erg = null; e.lade = null; e.filter = ''; e.suche = []; e.sucheText = ''; e.pruef = null;
   e.rk = null; e.rkU = null; e.dWahl = undefined; e.auswahl = [];
   if (s) {
@@ -201,11 +221,25 @@ function zeigeEditor() {
     }
   }
 
+  // 2b Richtung (seit 0.35): nur bei einer Linie mit mehreren Richtungen; danach Ziele in Fahrtreihenfolge
+  var richt = (e.a && !e.b && e.erg && e.wahlLinie && e.wahlLinie !== '*') ? L.richtungen(e.erg, e.wahlLinie) : [];
+  if (richt.length > 1) {
+    var st = stadtVon(e.a.name);
+    h += '<h2>2b · Richtung</h2><ul>' + richt.map(function (r, i) {
+      return '<li data-a="richtung" data-i="' + i + '" class="' + (e.wahlRichtung === i ? 'wahl' : '') + '"><b>' + esc(L.klarname(r.endhalt, st)) + '</b>' +
+        (r.ueber ? ' <span class="klein">über ' + esc(L.klarname(r.ueber, st)) + '</span>' : '') + '</li>';
+    }).join('') + '<li data-a="richtung" data-i="-1" class="' + (e.wahlRichtung === -1 ? 'wahl' : '') + '">Alle Halte A–Z</li></ul>';
+  }
+
   // 3 Ziel
-  if (e.a && !e.b && e.erg && e.wahlLinie) {
+  if (e.a && !e.b && e.erg && e.wahlLinie && (richt.length <= 1 || e.wahlRichtung !== null)) {
     h += '<h2>3 · Ziel</h2><input type="text" id="filterZiel" placeholder="Ziel eingrenzen" autocomplete="off" value="' + esc(e.filter) + '"><ul>';
     var f = e.filter.toLowerCase(), treffer = [];
-    Object.keys(e.erg.ziele).sort(sortDe).forEach(function (n) {
+    var folge = richt.length === 1 ? richt[0] : (richt.length > 1 && e.wahlRichtung >= 0 ? richt[e.wahlRichtung] : null);
+    if (folge) folge.ziele.forEach(function (z) {                  // Fahrtreihenfolge, nächster Halt zuerst
+      if (!f || z.name.toLowerCase().indexOf(f) >= 0) treffer.push(z);
+    });
+    else Object.keys(e.erg.ziele).sort(sortDe).forEach(function (n) {
       var z = e.erg.ziele[n];
       if (!z.hin || (e.wahlLinie !== '*' && !z.linien[e.wahlLinie])) return;
       if (f && n.toLowerCase().indexOf(f) < 0) return;
@@ -341,7 +375,7 @@ function naheSuchen() {
 
 function startGewaehlt(t) {
   e.a = { id: t.id, name: t.name, kurz: kurzname(t.name, stadtVon(t.name)), lat: t.lat, lon: t.lon };
-  e.b = null; e.erg = null; e.wahlLinie = null; e.pruef = null; e.filter = '';
+  e.b = null; e.erg = null; e.wahlLinie = null; e.wahlRichtung = null; e.pruef = null; e.filter = '';
   ladeErreichbar();
 }
 
@@ -416,7 +450,7 @@ function pruefen() {
 
 function cAus(k, linien) { return { id: k.id, name: k.name, kurz: (e.c && e.c.name === k.name && e.c.kurz) || kurzname(k.name, stadtVon(e.a.name)), linien: linien, lat: k.lat, lon: k.lon }; }
 
-// Rückfahrt (seit 3.3): erst genau zum Start; Umkreis nur auf Knopfdruck. Bisherige Wahl bleibt erhalten.
+// Rückfahrt (seit 0.33): erst genau zum Start; Umkreis nur auf Knopfdruck. Bisherige Wahl bleibt erhalten.
 function rueckSuchen(fertig) {
   var bisherD = e.d;
   L.ankunftUm(e.a, L.GENAU_R, null, function (f, fahrten) {
@@ -501,18 +535,22 @@ document.addEventListener('click', function (ev) {
     linienNeu(); return zeigeEditor();
   }
   if (a === 'umkreisWert') { umkreisWert = parseInt(el.value, 10) || 1000; return; }
+  if (a === 'abfahrtWert') { abfahrtWert = el.value === 'aktuell' ? 'aktuell' : 'plan'; return; }
+  if (a === 'dauerWert') { dauerWert = el.checked ? 'an' : 'aus'; return; }
+  if (a === 'quelleWert') { quelleWert = ['rmv', 'trans'].indexOf(el.value) >= 0 ? el.value : 'auto'; return; }
   if (a === 'loeschen') { if (confirm('Strecke löschen?')) { strecken.splice(i, 1); } return zeigeListe(); }
   if (a === 'hoch' && i > 0) { strecken.splice(i - 1, 0, strecken.splice(i, 1)[0]); return zeigeListe(); }
   if (a === 'runter' && i < strecken.length - 1) { strecken.splice(i + 1, 0, strecken.splice(i, 1)[0]); return zeigeListe(); }
   if (a === 'layout') { layout = ['klar', 'phosphor'].indexOf(el.value) >= 0 ? el.value : 'led'; return; }
-  if (a === 'speichern') return schliessen({ strecken: strecken, rmvKey: rmvKey, layout: layout, umkreis: umkreisWert });
+  if (a === 'speichern') return schliessen({ strecken: strecken, rmvKey: rmvKey, layout: layout, umkreis: umkreisWert, quelle: quelleWert, abfahrt: abfahrtWert, dauer: dauerWert });
   if (a === 'rmvTest') return rmvPruefen();
   if (a === 'abbrechen') return schliessen({ abbruch: true });
   if (a === 'nah') return naheSuchen();
   if (a === 'start') return startGewaehlt(e.suche[i]);
   if (a === 'startNeu') { e.a = null; e.b = null; e.erg = null; e.wahlLinie = null; e.pruef = null; return zeigeEditor(); }
   if (a === 'nochmal') return ladeErreichbar();
-  if (a === 'linie') { e.wahlLinie = el.getAttribute('data-l'); e.filter = ''; return zeigeEditor(); }
+  if (a === 'linie') { e.wahlLinie = el.getAttribute('data-l'); e.wahlRichtung = null; e.filter = ''; return zeigeEditor(); }
+  if (a === 'richtung') { e.wahlRichtung = i; e.filter = ''; return zeigeEditor(); }
   if (a === 'ziel') return zielGewaehlt(e.erg.ziele[el.getAttribute('data-n')]);
   if (a === 'zielNeu') {
     e.b = null; e.c = null; e.d = null; e.pruef = null; e.rk = null; e.rkU = null;

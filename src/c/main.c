@@ -2,10 +2,12 @@
 // Bis zu 8 Strecken (Haltestellenpaare), eingerichtet am Handy oder im Uhr-Menü. Alle Zeiten kommen als
 // Unix-Sekunden (UTC); Anzeige immer in deutscher Zeit, unabhängig von der Zeitzone der Uhr.
 // Hoch/Runter = Strecke wechseln, Select = neu laden, Select lang = Menü, Zurück = beenden.
-// Drei Ansichten: LED-Haltestellenanzeige (Standard), „Klar“ (weiß, Systemschrift, 3.1) und „Phosphor“ (Radar-Grün,
-// Pixelschrift wie das Watchface Phosphor, 3.4), umschaltbar am Handy (Einstellungsseite) oder an der Uhr
-// (Menü > Einstellungen > Ansicht). Seit 3.4 je Abfahrt die Fahrtdauer zum Ziel; Minuten überall mit Strich (13').
-// Uhr-Menü (Version 3.0): Hauptmenü und "Fahrt ändern" kennt die Uhr selbst; alle weiteren Listen
+// Drei Ansichten: LED-Haltestellenanzeige (Standard), „Klar“ (weiß, Systemschrift, 0.31) und „Phosphor“ (Radar-Grün,
+// Pixelschrift wie das Watchface Phosphor, 0.34), umschaltbar am Handy (Einstellungsseite) oder an der Uhr
+// (Menü > Einstellungen > Ansicht). Seit 0.34 je Abfahrt die Fahrtdauer zum Ziel; Minuten überall mit Strich (13').
+// Seit 0.35 einstellbar: Abfahrtszeit Fahrplan (Standard, Verspätung als +2') oder aktuell (Zeit mit Verspätung,
+// in Klar/Phosphor farbig), Fahrtdauer an (Standard) oder aus, Quelle Auto / nur RMV / nur Transitous.
+// Uhr-Menü (Version 0.30): Hauptmenü und "Fahrt ändern" kennt die Uhr selbst; alle weiteren Listen
 // (Haltestellen, Linien, Ziele, Rückfahrt) rechnet das Handy und schickt sie in Blöcken zu 10.
 #include <pebble.h>
 #include "led_font.h"
@@ -33,15 +35,23 @@
 #define LADE_MS 30000      // ohne Antwort vom Handy: "KEINE ANTWORT"
 #define PK_LAYOUT 1        // persist-Schlüssel: Ansicht, damit sie schon vor der Antwort des Handys stimmt
 #define PK_UMKREIS 2       // persist-Schlüssel: Umkreis um den Start für die Rückfahrt-Suche (Meter)
+#define PK_QUELLE 3        // persist-Schlüssel: Quelle der Abfahrten (QUELLE_AUTO/RMV/TRANS), seit 0.35
+#define PK_ABFAHRT 4       // persist-Schlüssel: Abfahrtszeit Fahrplan (0) oder aktuell mit Verspätung (1), seit 0.35
+#define PK_DAUER 5         // persist-Schlüssel: Fahrtdauer zeigen (1) oder nicht (0), seit 0.35
 
 enum { ST_LEER = -2, ST_LADE = -1, ST_SOLL = 0, ST_LIVE = 1, ST_NETZ = 2, ST_FEHLER = 3 };
 enum { M_ANZEIGE, M_LISTE, M_LADE };                       // was die Uhr gerade zeigt
-enum { L_HANDY, L_MENUE, L_AENDERN, L_EINST, L_ANSICHT, L_UMKREIS };  // woher die Liste stammt
+enum { L_HANDY, L_MENUE, L_AENDERN, L_EINST, L_ANSICHT, L_UMKREIS, L_QUELLE };  // woher die Liste stammt
+enum { QUELLE_AUTO = 0, QUELLE_RMV = 1, QUELLE_TRANS = 2 };                     // wie QUELLEN in index.js
+enum { ABF_PLAN = 0, ABF_AKTUELL = 1 };                                          // Abfahrtszeit: Fahrplan oder mit Verspätung
+enum { E_ANSICHT, E_ABFAHRT, E_DAUER, E_QUELLE, E_UMKREIS };                     // Reihenfolge im Menü Einstellungen
 enum { LAYOUT_LED = 0, LAYOUT_KLAR = 1, LAYOUT_PHOSPHOR = 2 };
 enum { A_UNTERMENUE = 0, A_NEU = 1, A_AENDERN_RUECK = 2, A_AENDERN_START = 3, A_LOESCHEN = 4,
-       A_WAHL = 5, A_ZURUECK = 6, A_LAYOUT = 7, A_UMKREIS = 8,
+       A_WAHL = 5, A_ZURUECK = 6, A_LAYOUT = 7, A_UMKREIS = 8, A_QUELLE = 9, A_ABFAHRT = 10, A_DAUER = 11,
        A_EINST = -1, A_ANSICHT = -2, A_SET_LED = -3, A_SET_KLAR = -4,
-       A_UMK = -5, A_SET_U500 = -6, A_SET_U1000 = -7, A_SET_U2000 = -8, A_SET_PHOSPHOR = -9 };   // negative: nur auf der Uhr                        // AKTION an das Handy, wie in index.js
+       A_UMK = -5, A_SET_U500 = -6, A_SET_U1000 = -7, A_SET_U2000 = -8, A_SET_PHOSPHOR = -9,
+       A_QLL = -10, A_SET_QAUTO = -11, A_SET_QRMV = -12, A_SET_QTRANS = -13,
+       A_ABF_UM = -14, A_DAUER_UM = -15 };   // negative: nur auf der Uhr                        // AKTION an das Handy, wie in index.js
 
 static Window *s_window;
 static Layer *s_layer;
@@ -76,9 +86,12 @@ static int s_modus = M_ANZEIGE;
 static int s_lart;                  // L_HANDY, L_MENUE oder L_AENDERN
 static char s_ltitel[LTXT];
 static char s_ltext[MAXL][LTXT];    // 300 x 32 = 9,6 KB
-static int8_t s_lakt[6];            // Aktion je Eintrag der Uhr-eigenen Menüs
+static int8_t s_lakt[8];            // Aktion je Eintrag der Uhr-eigenen Menüs
 static int s_layout = LAYOUT_LED;
 static int s_umkreis = 1000;      // Meter; das Handy führt den Wert, die Uhr zeigt und ändert ihn
+static int s_quelle = QUELLE_AUTO; // Quelle der Abfahrten; das Handy führt den Wert, wie beim Umkreis
+static int s_abfahrt = ABF_PLAN;   // vorne die Fahrplanzeit (Standard) oder die aktuelle mit Verspätung
+static bool s_dauer = true;        // Fahrtdauer zum Ziel zeigen (Standard an)
 #define T(led, klar) (s_layout == LAYOUT_KLAR ? (klar) : (led))   // Menütexte je Ansicht
 static int s_lanz, s_lsel, s_loben;
 static char s_ladetext[LTXT];
@@ -256,7 +269,8 @@ static void richtung(const Strecke *s, int r, int y, time_t now, int xt) {
       s_dim_zeichnen = false;
     }
     if (v == AUSFALL) { KLEIN("FAELLT AUS", xt, yy + 2); continue; }
-    berlin_hm(s->dep[r][i] - v * 60, &h, &m);          // vorne die Fahrplanzeit
+    const int vz = s_abfahrt == ABF_AKTUELL ? 0 : v;    // aktuell: Zeit enthält die Verspätung, kein "+2'"
+    berlin_hm(s->dep[r][i] - vz * 60, &h, &m);         // vorne die Fahrplanzeit (oder die aktuelle)
     snprintf(zeit, sizeof(zeit), "%02d:%02d", h, m);
     GROSS(zeit, xt, yy, 1);
     const int min = (s->dep[r][i] - now) / 60;           // Restminuten mit Verspätung
@@ -270,8 +284,8 @@ static void richtung(const Strecke *s, int r, int y, time_t now, int xt) {
       rand = COLS - 1 - text_w(F35, F35_N, rechts, 1);
       if (x + 1 > rand) { rechts[0] = '\0'; rand = COLS; }
     }
-    if (v != 0) {
-      snprintf(vs, sizeof(vs), "%+d'", v);
+    if (vz != 0) {
+      snprintf(vs, sizeof(vs), "%+d'", vz);
       const int vende = x + text_w(F35, F35_N, vs, 1);
       if (rechts[0] && rgross && vende + 3 > rand) {               // zu eng: Restminuten klein, passt auch das nicht, weglassen
         rgross = false;
@@ -281,7 +295,7 @@ static void richtung(const Strecke *s, int r, int y, time_t now, int xt) {
       KLEIN(vs, x, yy + 2);
       x = vende + 2;
     }
-    if (s->dur[r][i] > 0) {                              // Fahrtdauer nur, wenn sie ohne Verdrängen passt
+    if (s_dauer && s->dur[r][i] > 0) {                   // Fahrtdauer nur, wenn sie ohne Verdrängen passt
       char ds[8];
       snprintf(ds, sizeof(ds), "%d'", s->dur[r][i]);
       if (x + text_w(F35, F35_N, ds, 1) + 3 <= rand) {
@@ -463,18 +477,20 @@ static void k_richtung(GContext *ctx, const Strecke *s, int r, int y, time_t now
     k_text(ctx, lin, s_f18b, GRect(8, yy + 1, bw, 22), GTextAlignmentCenter, GColorWhite);
     char zeit[16], buf[16];
     int h, m;
-    berlin_hm(s->dep[r][i] - (v == AUSFALL ? 0 : v * 60), &h, &m);   // vorne die Fahrplanzeit
+    const int vz = (v == AUSFALL || s_abfahrt == ABF_AKTUELL) ? 0 : v;   // aktuell: Zeit mit Verspätung, orange
+    berlin_hm(s->dep[r][i] - vz * 60, &h, &m);                       // vorne die Fahrplanzeit (oder die aktuelle)
     snprintf(zeit, sizeof(zeit), "%02d:%02d", h, m);
     const int xt = 8 + bw + 7;
-    k_text(ctx, zeit, s_f28b, GRect(xt, yy - 5, 80, 34), GTextAlignmentLeft, v == AUSFALL ? K_GRAU : GColorBlack);
+    k_text(ctx, zeit, s_f28b, GRect(xt, yy - 5, 80, 34), GTextAlignmentLeft,
+           v == AUSFALL ? K_GRAU : (v != vz ? K_ORANGE : GColorBlack));
     if (v == AUSFALL) {
       k_text(ctx, "fällt aus", s_f18b, GRect(100, yy + 2, 92, 24), GTextAlignmentRight, K_ROT);
       continue;
     }
     const int xz = xt + k_breite(zeit, s_f28b) + 2;                 // rechts neben der Zeit: oben Verspätung, unten Steig + Fahrtdauer
     int oben = xz, unten = xz;                                       // rechte Kanten der beiden kleinen Zeilen
-    if (v != 0) {
-      snprintf(buf, sizeof(buf), "%+d'", v);
+    if (vz != 0) {
+      snprintf(buf, sizeof(buf), "%+d'", vz);
       k_text(ctx, buf, s_f14b, GRect(xz, yy - 1, 40, 18), GTextAlignmentLeft, K_ORANGE);
       oben = xz + k_breite(buf, s_f14b);
     }
@@ -487,7 +503,7 @@ static void k_richtung(GContext *ctx, const Strecke *s, int r, int y, time_t now
       unten = xz + sw + 4;
     }
     char ds[8] = "", rs[8] = "";
-    if (s->dur[r][i] > 0) snprintf(ds, sizeof(ds), "%d'", s->dur[r][i]);
+    if (s_dauer && s->dur[r][i] > 0) snprintf(ds, sizeof(ds), "%d'", s->dur[r][i]);
     const int min = (s->dep[r][i] - now) / 60;                       // Restminuten mit Verspätung
     if (min < 100) snprintf(rs, sizeof(rs), "%d'", min);
     GFont rf = s_f28b;
@@ -666,22 +682,23 @@ static void p_richtung(GContext *ctx, const Strecke *s, int r, int y, time_t now
     x += 5;
     char zeit[8], buf[12], ds[8] = "", rs[8] = "";
     int h, m;
-    berlin_hm(s->dep[r][i] - (ausfall ? 0 : v * 60), &h, &m);   // vorne die Fahrplanzeit
+    const int vz = (ausfall || s_abfahrt == ABF_AKTUELL) ? 0 : v;   // aktuell: Zeit mit Verspätung, gelb
+    berlin_hm(s->dep[r][i] - vz * 60, &h, &m);                  // vorne die Fahrplanzeit (oder die aktuelle)
     snprintf(zeit, sizeof(zeit), "%02d:%02d", h, m);
     if (ausfall) {
       P_GROSS(zeit, x, yy, 3, P_GRAU);
       P_KLEIN("FAELLT AUS", 196 - P_W("FAELLT AUS", 2), yy + 6, P_WARN);
       continue;
     }
-    P_GROSS(zeit, x, yy, 3, P_TEXT);
+    P_GROSS(zeit, x, yy, 3, v != vz ? P_WARN : P_TEXT);
     const int xz = x + P_GW(zeit, 3) + 3;                          // Spalte: oben Verspätung, unten Fahrtdauer
     int oben = xz;
-    if (v != 0) {
-      snprintf(buf, sizeof(buf), "%+d'", v);
+    if (vz != 0) {
+      snprintf(buf, sizeof(buf), "%+d'", vz);
       P_KLEIN(buf, xz, yy, P_WARN);
       oben = xz + P_W(buf, 2);
     }
-    if (s->dur[r][i] > 0) snprintf(ds, sizeof(ds), "%d'", s->dur[r][i]);
+    if (s_dauer && s->dur[r][i] > 0) snprintf(ds, sizeof(ds), "%d'", s->dur[r][i]);
     const int min = (s->dep[r][i] - now) / 60;                     // Restminuten mit Verspätung
     if (min < 100) snprintf(rs, sizeof(rs), "%d'", min);
     int rsc = 3, rand = rs[0] ? 196 - P_GW(rs, 3) : 200;
@@ -952,12 +969,31 @@ static void umkreis_text(char *buf, size_t n, const char *vor, int m) {   // "UM
   else snprintf(buf, n, T("%s%dM", "%s%d m"), vor, m);
 }
 
-static void einstellungen_zeigen(void) {               // Menü > Einstellungen, kennt die Uhr selbst
+// Menü > Einstellungen, kennt die Uhr selbst. Reihenfolge (E_…): erst was die Anzeige ändert, dann woher die
+// Daten kommen, zuletzt die Rückfahrt-Suche der Einrichtung. Zwei Werte: Select schaltet um, man bleibt in der Liste.
+// Drei Werte: eigene Auswahlliste. sel = vorausgewählter Eintrag (zurück aus einer Auswahl: derselbe wie vorher).
+static void einstellungen_zeigen(int sel) {
   char buf[LTXT];
   liste_beginnen(L_EINST, T("EINSTELLUNGEN", "Einstellungen"));
   eintrag(s_layout == LAYOUT_KLAR ? "Ansicht: Klar" : s_layout == LAYOUT_PHOSPHOR ? "ANSICHT: PHOSPHOR" : "ANSICHT: LED", A_ANSICHT);
+  eintrag(s_abfahrt == ABF_AKTUELL ? T("ABFAHRT: AKTUELL", "Abfahrt: aktuell") : T("ABFAHRT: FAHRPLAN", "Abfahrt: Fahrplan"), A_ABF_UM);
+  eintrag(s_dauer ? T("FAHRTDAUER: AN", "Fahrtdauer: an") : T("FAHRTDAUER: AUS", "Fahrtdauer: aus"), A_DAUER_UM);
+  eintrag(s_quelle == QUELLE_RMV ? T("QUELLE: NUR RMV", "Quelle: nur RMV") :
+          s_quelle == QUELLE_TRANS ? T("QUELLE: NUR TRANSITOUS", "Quelle: nur Transitous") : T("QUELLE: AUTO", "Quelle: Auto"), A_QLL);
   umkreis_text(buf, sizeof(buf), T("UMKREIS ", "Umkreis: "), s_umkreis);
   eintrag(buf, A_UMK);
+  s_lsel = sel;
+  lauf_starten();
+  layer_mark_dirty(s_layer);
+}
+
+static void quelle_zeigen(void) {                      // Quelle der Abfahrten, aktuelle vorausgewählt
+  liste_beginnen(L_QUELLE, T("QUELLE", "Quelle"));
+  eintrag(T("AUTO", "Auto"), A_SET_QAUTO);             // RMV mit Schlüssel, bei Fehler Transitous
+  eintrag(T("NUR RMV", "nur RMV"), A_SET_QRMV);
+  eintrag(T("NUR TRANSITOUS", "nur Transitous"), A_SET_QTRANS);
+  s_lsel = s_quelle;
+  lauf_starten();
   layer_mark_dirty(s_layer);
 }
 
@@ -1021,11 +1057,44 @@ static void umkreis_setzen(int m) {
   persist_write_int(PK_UMKREIS, s_umkreis);
 }
 
+static void abfahrt_setzen(int v) {
+  s_abfahrt = v == ABF_AKTUELL ? ABF_AKTUELL : ABF_PLAN;
+  persist_write_int(PK_ABFAHRT, s_abfahrt);
+}
+
+static void dauer_setzen(int v) {
+  s_dauer = v != 0;
+  persist_write_int(PK_DAUER, s_dauer ? 1 : 0);
+}
+
+static void abfahrt_umschalten(void) {                 // an der Uhr: sofort wirksam, Handy merkt es sich für die Seite
+  abfahrt_setzen(s_abfahrt == ABF_AKTUELL ? ABF_PLAN : ABF_AKTUELL);
+  aktion_abschicken(A_ABFAHRT, s_abfahrt);
+  einstellungen_zeigen(E_ABFAHRT);
+}
+
+static void dauer_umschalten(void) {
+  dauer_setzen(!s_dauer);
+  aktion_abschicken(A_DAUER, s_dauer ? 1 : 0);
+  einstellungen_zeigen(E_DAUER);
+}
+
+static void quelle_setzen(int v) {
+  s_quelle = (v == QUELLE_RMV || v == QUELLE_TRANS) ? v : QUELLE_AUTO;
+  persist_write_int(PK_QUELLE, s_quelle);
+}
+
+static void quelle_waehlen(int v) {                    // an der Uhr gewählt: Handy lädt die Strecke neu
+  quelle_setzen(v);
+  aktion_abschicken(A_QUELLE, s_quelle);
+  anzeige_zeigen();
+  if (s_anzahl > 0) warten_starten();
+}
+
 static void umkreis_waehlen(int m) {                   // an der Uhr gewählt: merken, Handy Bescheid geben
   umkreis_setzen(m);
   aktion_abschicken(A_UMKREIS, s_umkreis);
-  einstellungen_zeigen();
-  s_lsel = 1;                                          // zurück auf dem Eintrag Umkreis
+  einstellungen_zeigen(E_UMKREIS);                     // zurück auf dem Eintrag Umkreis
 }
 
 static void layout_waehlen(int v) {                    // an der Uhr umgeschaltet: merken, Handy Bescheid geben
@@ -1087,7 +1156,9 @@ static void liste_waehlen(void) {
   }
   const int a = s_lakt[s_lsel];
   if (a == A_UNTERMENUE) aendern_zeigen();
-  else if (a == A_EINST) einstellungen_zeigen();
+  else if (a == A_EINST) einstellungen_zeigen(E_ANSICHT);
+  else if (a == A_ABF_UM) abfahrt_umschalten();
+  else if (a == A_DAUER_UM) dauer_umschalten();
   else if (a == A_ANSICHT) ansicht_zeigen();
   else if (a == A_SET_LED) layout_waehlen(LAYOUT_LED);
   else if (a == A_SET_KLAR) layout_waehlen(LAYOUT_KLAR);
@@ -1096,6 +1167,10 @@ static void liste_waehlen(void) {
   else if (a == A_SET_U500) umkreis_waehlen(500);
   else if (a == A_SET_U1000) umkreis_waehlen(1000);
   else if (a == A_SET_U2000) umkreis_waehlen(2000);
+  else if (a == A_QLL) quelle_zeigen();
+  else if (a == A_SET_QAUTO) quelle_waehlen(QUELLE_AUTO);
+  else if (a == A_SET_QRMV) quelle_waehlen(QUELLE_RMV);
+  else if (a == A_SET_QTRANS) quelle_waehlen(QUELLE_TRANS);
   else aktion_senden(a, s_seite);                      // Löschen ohne Rückfrage: eine neue Fahrt ist schnell angelegt
 }
 
@@ -1104,7 +1179,9 @@ static void zurueck(void) {
     case M_ANZEIGE: window_stack_pop(true); break;     // App beenden
     case M_LISTE:
       if (s_lart == L_AENDERN || s_lart == L_EINST) menue_zeigen();
-      else if (s_lart == L_ANSICHT || s_lart == L_UMKREIS) einstellungen_zeigen();
+      else if (s_lart == L_ANSICHT) einstellungen_zeigen(E_ANSICHT);
+      else if (s_lart == L_UMKREIS) einstellungen_zeigen(E_UMKREIS);
+      else if (s_lart == L_QUELLE) einstellungen_zeigen(E_QUELLE);
       else if (s_lart == L_MENUE) anzeige_zeigen();
       else aktion_senden(A_ZURUECK, 0);
       break;
@@ -1139,6 +1216,9 @@ static void empfangen(DictionaryIterator *it, void *ctx) {
     if (t) s_seite = begrenzen(t->value->int32, 0, s_anzahl > 0 ? s_anzahl - 1 : 0);
     if ((t = dict_find(it, MESSAGE_KEY_LAYOUT))) layout_setzen(t->value->int32);   // Handy führt die Einstellung
     if ((t = dict_find(it, MESSAGE_KEY_UMKREIS))) umkreis_setzen(t->value->int32);
+    if ((t = dict_find(it, MESSAGE_KEY_QUELLWAHL))) quelle_setzen(t->value->int32);
+    if ((t = dict_find(it, MESSAGE_KEY_ABFAHRT))) abfahrt_setzen(t->value->int32);
+    if ((t = dict_find(it, MESSAGE_KEY_DAUER))) dauer_setzen(t->value->int32);
     if (s_anzahl == 0 && s_timeout) { app_timer_cancel(s_timeout); s_timeout = NULL; }
     if (s_modus != M_ANZEIGE) {                          // Menü-Ablauf fertig (gespeichert, gelöscht)
       anzeige_zeigen();
@@ -1227,6 +1307,9 @@ static void init(void) {
     s_layout = (v == LAYOUT_KLAR || v == LAYOUT_PHOSPHOR) ? v : LAYOUT_LED;
   }
   if (persist_exists(PK_UMKREIS)) umkreis_setzen(persist_read_int(PK_UMKREIS));
+  if (persist_exists(PK_QUELLE)) quelle_setzen(persist_read_int(PK_QUELLE));
+  if (persist_exists(PK_ABFAHRT)) abfahrt_setzen(persist_read_int(PK_ABFAHRT));
+  if (persist_exists(PK_DAUER)) dauer_setzen(persist_read_int(PK_DAUER));
 
   s_window = window_create();
   window_set_background_color(s_window, GColorBlack);

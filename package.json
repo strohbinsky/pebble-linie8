@@ -1,7 +1,7 @@
 {
   "name": "linie8",
   "author": "Seb & Claude",
-  "version": "3.4.0",
+  "version": "0.35.0",
   "keywords": [
     "pebble-app"
   ],
@@ -47,7 +47,10 @@
       "RUECK_S[3]",
       "UMKREIS",
       "HIN_F[3]",
-      "RUECK_F[3]"
+      "RUECK_F[3]",
+      "QUELLWAHL",
+      "ABFAHRT",
+      "DAUER"
     ],
     "resources": {
       "media": [

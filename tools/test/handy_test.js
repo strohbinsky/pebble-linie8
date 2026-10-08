@@ -84,6 +84,10 @@ function los() { var f = schritte.shift(); if (f) f(los); else fertig(); }
 function erwarte(titel, re, info) {
   dann(function (w) { warte(listeDa(titel), function () { console.log(zeige()); if (info) info(); if (re) waehle(re); w(); }); });
 }
+function alleHalteFallsRichtung() {   // seit 0.35: nach einer Linie kommt die Richtung, wenn es mehrere gibt
+  dann(function (w) { warte(function () { return listeDa('RICHTUNG')() || listeDa('ZIEL')(); }, function () { if (uhr.liste.titel === 'RICHTUNG') { console.log(zeige()); waehle(/^ALLE HALTE A-Z$/); } w(); }); });
+}
+function zurueckBis(titel) { dann(function (w) { console.log('  -> zurück'); aktion(6); w(); }); erwarte(titel, null); }
 function strecken() { return JSON.parse(speicher.strecken || '[]'); }
 function zeigeStrecken() { strecken().forEach(function (s, i) { console.log('  Strecke ' + (i + 1) + ': ' + s.a.kurz + ' -> ' + s.b.kurz + ' | zurück ' + (s.c ? s.c.kurz : '-') + ' | [' + s.linien.join(',') + ']' + (s.alle ? ' alle' : '')); }); }
 function einrichtungDa(n) { dann(function (w) { warte(function () { return uhr.einrichtung && uhr.einrichtung.anzahl === n && !uhr.liste; }, function () { console.log('Einrichtung an Uhr: ' + JSON.stringify(uhr.einrichtung)); zeigeStrecken(); w(); }); }); }
@@ -95,11 +99,22 @@ console.log('== 1 Neue Fahrt ab Hbf, Linie 4, Rückfahrt nein -> Liste');
 dann(function (w) { aktion(1); w(); });
 erwarte('START', /^HAUPTBAHNHOF/);
 erwarte('LINIE', /^4$/);
+alleHalteFallsRichtung();
 erwarte('ZIEL', /^RHEINSTR/);
 erwarte('ZURUECK AB ZIEL?', /^NEIN$/);
 erwarte('RUECKFAHRT AB', /M$/, function () { if (uhr.liste.texte.some(function (t) { return /\(ZIEL\)/.test(t); })) { console.log('FEHLER: Ziel trotz Nein angeboten'); process.exit(1); } });
 einrichtungDa(1);
 dann(function (w) { warte(function () { return uhr.abfahrten.length; }, function () { var a = uhr.abfahrten[uhr.abfahrten.length - 1]; console.log('Abfahrten: Quelle ' + a.QUELLE + ' Status ' + a.STATUS + ' hin ' + [0, 1, 2].map(function (j) { return a['HIN_L[' + j + ']'] + '@' + new Date(a['HIN[' + j + ']'] * 1000).toISOString().substring(11, 16) + 'Z+' + a['HIN_F[' + j + ']'] + "'"; }).join(' ')); if (!(a['HIN_F[0]'] > 0)) { console.log('FEHLER: keine Fahrtdauer'); process.exit(1); } w(); }); });
+console.log('== 1b Linie 8 ab Hbf: Richtung, Ziele in Fahrtreihenfolge, zurück bis ins Menü');
+dann(function (w) { aktion(1); w(); });
+erwarte('START', /^HAUPTBAHNHOF/);
+erwarte('LINIE', /^8$/);
+erwarte('RICHTUNG', /UEBER/, function () { if (uhr.liste.texte[uhr.liste.n - 1] !== 'ALLE HALTE A-Z') { console.log('FEHLER: ALLE HALTE A-Z fehlt'); process.exit(1); } });
+erwarte('ZIEL', null, function () { var t = uhr.liste.texte; if (t.slice().sort().join() === t.join() && t.length > 3) console.log('  Hinweis: Liste zufällig alphabetisch?'); });
+zurueckBis('RICHTUNG');
+zurueckBis('LINIE');
+zurueckBis('START');
+dann(function (w) { var e0 = uhr.ende; aktion(6); warte(function () { return uhr.ende > e0; }, function () { console.log('Ende -> Uhr-Menü'); w(); }); });
 console.log('== 2 Zurück-Taste: Linie -> Start -> Ende; Abbruch während des Ladens');
 dann(function (w) { aktion(1); w(); });
 erwarte('START', /^HAUPTBAHNHOF/);
@@ -139,9 +154,20 @@ console.log('== 5 Fahrt ändern -> Start (ersetzt Strecke 2), Start am Kurhaus')
 dann(function (w) { standort = KURHAUS; aktion(3, 1); w(); });
 erwarte('START', /^KURHAUS/);
 erwarte('LINIE', /^\d/);
+alleHalteFallsRichtung();
 erwarte(/^ZIEL$/, /./);
 erwarte(/^(ZURUECK AB ZIEL\?|RUECKFAHRT AB)$/, /./);
 einrichtungDa(2);
+console.log('== 5b Quelle an der Uhr: nur Transitous, dann Auto');
+dann(function (w) { var n0 = uhr.abfahrten.length; aktion(9, 2); warte(function () { return uhr.abfahrten.length > n0; }, function () {
+  var a = uhr.abfahrten[uhr.abfahrten.length - 1]; console.log('  Quelle ' + a.QUELLE + ' (gespeichert: ' + speicher.quelle + ')');
+  if (a.QUELLE !== 'TRANS' || speicher.quelle !== 'trans') { console.log('FEHLER: nur Transitous greift nicht'); process.exit(1); } w(); }); });
+dann(function (w) { var n0 = uhr.abfahrten.length; aktion(9, 0); warte(function () { return uhr.abfahrten.length > n0; }, function () {
+  var a = uhr.abfahrten[uhr.abfahrten.length - 1]; console.log('  Quelle ' + a.QUELLE + ' (gespeichert: ' + speicher.quelle + ', Schlüssel ' + (speicher.rmvKey ? 'ja' : 'nein') + ')'); w(); }); });
+console.log('== 5c Abfahrt aktuell, Fahrtdauer aus (an der Uhr), dann zurück auf Standard');
+dann(function (w) { aktion(10, 1); aktion(11, 0); setTimeout(function () {
+  if (speicher.abfahrt !== 'aktuell' || speicher.dauer !== 'aus') { console.log('FEHLER: Abfahrt/Fahrtdauer nicht gespeichert'); process.exit(1); }
+  console.log('  gespeichert: abfahrt ' + speicher.abfahrt + ', dauer ' + speicher.dauer); aktion(10, 0); aktion(11, 1); w(); }, 50); });
 console.log('== 6 Löschen Strecke 1');
 dann(function (w) { aktion(4, 0); w(); });
 einrichtungDa(1);

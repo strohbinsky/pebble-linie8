@@ -16,8 +16,9 @@ transfers. Every route is a pair of stops served by at least one line directly.
 Made together by **Seb & Claude** (Anthropic): ideas, design decisions and real-world testing by Seb,
 code, tests and documentation by Claude in pair-programming sessions.
 
-> **Status:** version 3.4 (third view "Phosphor", travel time to the destination for every departure) is tested
-> in the emery emulator and with Node tests against live data. Earlier versions run on a real Pebble Time 2.
+> **Status: beta, version 0.35.** Not yet tested in daily use — only in the emery emulator and with Node tests
+> against live data. Version numbers start with 0 until the app has proven itself on the street. Releases
+> published earlier as 3.2.0 to 3.4.0 are the same line of development (now 0.32 to 0.34).
 
 <p>
   <img src="docs/images/display-led.png" width="200" alt="LED view">
@@ -39,7 +40,8 @@ departure are the number to go by**.*
   at the bottom. Only direct connections are shown, so branching lines are handled correctly
 - **Real-time data from RMV** (Rhein-Main-Verkehrsverbund) with delays and cancellations, if you add your own
   free RMV API key. Without a key, or if RMV fails, the app falls back to **[Transitous](https://transitous.org)**
-  (timetable only, no key needed). The status line shows which source was used
+  (timetable only, no key needed). The status line shows which source was used. You can also fix the source:
+  *Auto* (default, as described), *RMV only* or *Transitous only*
 - **Platform for every departure** (*Steig*), e.g. `D` at Wiesbaden Hbf — at stops with several platforms
   (A to D) you know where to wait. Real-time platform changes from RMV are taken into account. LED view:
   small and dimmed right after the line number, so `16 D` is not read as a line "16D"; Klar view: a small
@@ -51,7 +53,10 @@ departure are the number to go by**.*
 - **Travel time to the destination** for every departure (`7'`), from real-time arrival minus real-time
   departure where available. Shown small next to the departure; the delay is coloured (LED: bright), the
   travel time grey (LED: dimmed). If space runs out, the travel time goes first — in the LED view that means
-  it mostly shows only for buses on time
+  it mostly shows only for buses on time. Can be switched off
+- **Departure time as scheduled or as expected.** Default: the timetable time with the delay next to it
+  (`10:43 +4'`). Alternative: the expected time with the delay already included (`10:47`), coloured in the
+  Klar and Phosphor views. The minutes until departure always include the delay
 - **Minutes with a tick everywhere:** `13'` until departure, `+1'` delay, `7'` travel time
 - **Three views**, switchable on the phone or on the watch: LED (default), Klar and Phosphor
 - **Set up routes right on the watch** — long-press Select opens a menu:
@@ -87,15 +92,19 @@ departure are the number to go by**.*
 
 1. **Start** — the 10 nearest stops to your phone's location
 2. **Line** — all lines from that stop, or *all lines*
-3. **Destination** — alphabetical, only stops *after* the start. With more than 40 destinations (busy
-   stations) you pick the first letter first
-4. **Return from destination?** — asked only if a bus goes from the destination directly back to the start
-5. **Return stop** — otherwise: stops within 2 km of the destination with a direct connection back to
+3. **Direction** — only if you picked one line: one entry per terminus, e.g. `SONNENBERG BAHNHOLZ`. If the
+   line runs to the same terminus on different routes, one entry per route, named after the first stop only
+   that route serves (`EIGENHEIM UEBER DAMBACHTAL`). Skipped when there is only one direction
+4. **Destination** — after a direction: **in the order the bus stops**, next stop first. With *all lines*
+   (or *ALLE HALTE A-Z* at the end of the direction list): alphabetical, only stops *after* the start. With
+   more than 40 destinations (busy stations) you pick the first letter first
+5. **Return from destination?** — asked only if a bus goes from the destination directly back to the start
+6. **Return stop** — otherwise: stops within 2 km of the destination with a direct connection back to
    exactly the start, sorted by distance. At the end of the list: *Umkreis 1 km* and *ohne Rückfahrt*
-6. **Only if you choose *Umkreis*:** stops within 2 km of the destination whose bus ends within the radius
+7. **Only if you choose *Umkreis*:** stops within 2 km of the destination whose bus ends within the radius
    around the start, then **where to get off** — the start first, otherwise sorted by distance to the start.
    You always confirm this step. Nothing found: a larger radius is offered
-7. Saved, short names are generated automatically. The watch always queries exactly the saved pair of stops
+8. Saved, short names are generated automatically. The watch always queries exactly the saved pair of stops
 
 ### Radius around the start
 
@@ -104,10 +113,23 @@ departure are the number to go by**.*
 
 The radius is only a search aid while setting up a route. It never changes a saved route.
 
-### Switching the view
+### Settings
 
-- Phone: Pebble app → Linie 8 → settings → *Ansicht auf der Uhr* → LED, Klar or Phosphor
-- Watch: long-press Select → *Einstellungen* → *Ansicht* → LED, Klar or Phosphor
+Watch: long-press Select → *Einstellungen*. Phone: Pebble app → Linie 8 → settings, same order
+(*Anzeige auf der Uhr*, *Datenquelle*, *Umkreis für die Rückfahrt*). Two-way settings switch in place with
+Select; the others open a list.
+
+| Entry | Values | Default |
+| --- | --- | --- |
+| `ANSICHT` (view) | LED · Klar · Phosphor | LED |
+| `ABFAHRT` (departure time) | Fahrplan (scheduled) · aktuell (expected) | Fahrplan |
+| `FAHRTDAUER` (travel time) | an · aus | an |
+| `QUELLE` (source) | Auto · nur RMV · nur Transitous | Auto |
+| `UMKREIS` (radius, see above) | 500 m · 1 km · 2 km | 1 km |
+
+<p><img src="docs/images/settings-led.png" width="200" alt="Settings, LED view"></p>
+
+Switching the view:
 
 <p>
   <img src="docs/images/view-led.png" width="200" alt="View selection, LED">

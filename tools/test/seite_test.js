@@ -18,7 +18,7 @@ var ctx = { document: document, XMLHttpRequest: X.XMLHttpRequest, setTimeout: se
             setInterval: function () {}, alert: console.log, confirm: function () { return true; }, console: console, JSON: JSON, Math: Math };
 vm.createContext(ctx);
 vm.runInContext(script, ctx);
-function klicke(attr) { klick({ target: { value: attr.value, getAttribute: function (k) { return attr[k] === undefined ? null : attr[k]; }, parentNode: null } }); }
+function klicke(attr) { klick({ target: { value: attr.value, checked: attr.checked, getAttribute: function (k) { return attr[k] === undefined ? null : attr[k]; }, parentNode: null } }); }
 function warte(bed, cb, t0) {
   t0 = t0 || Date.now();
   if (bed()) return cb();
@@ -35,7 +35,16 @@ warte(function () { return ctx.e && ctx.e.suche && ctx.e.suche.length; }, functi
   klicke({ 'data-a': 'start', 'data-i': String(i) });
   warte(function () { return ctx.e.erg; }, function () {
     console.log('Linien:', Object.keys(ctx.e.erg.linien).join(' '), '| Ziele:', Object.keys(ctx.e.erg.ziele).length);
+    // Richtung (seit 0.35): Linie 8 ab Hbf hat mehrere, danach Ziele in Fahrtreihenfolge
+    klicke({ 'data-a': 'linie', 'data-l': '8' });
+    var tr = text();
+    if (!/2b · Richtung/.test(tr) || / 3 · Ziel /.test(tr)) { console.log('FEHLER: Richtung fehlt oder Ziel zu früh'); process.exit(1); }
+    console.log('Richtungen:', (tr.match(/2b · Richtung (.*?) Alle Halte/) || [])[1]);
+    klicke({ 'data-a': 'richtung', 'data-i': '0' });
+    console.log('Ziele in Folge:', (text().match(/Ziel eingrenzen?.{0,0}(.*)/) || [''])[0].substring(0, 160));
+    if (!/ 3 · Ziel /.test(text())) { console.log('FEHLER: Ziel nach Richtung fehlt'); process.exit(1); }
     klicke({ 'data-a': 'linie', 'data-l': '4' });
+    if (ctx.e.wahlRichtung !== null) { console.log('FEHLER: Richtung bleibt nach Linienwechsel'); process.exit(1); }
     var z = Object.keys(ctx.e.erg.ziele).filter(function (n) { return /Luisenplatz$/.test(n); })[0];
     klicke({ 'data-a': 'ziel', 'data-n': z });
     warte(function () { return ctx.e.pruef && ctx.e.pruef.fertig && ctx.e.rk && !ctx.e.rk.lade; }, function () {
@@ -43,7 +52,7 @@ warte(function () { return ctx.e && ctx.e.suche && ctx.e.suche.length; }, functi
       console.log('Rückfahrt ab:', ctx.e.c && ctx.e.c.name, '| Auswahl:', ctx.e.auswahl.join(' '));
       function gesperrt() { return /data-a="uebernehmen" disabled/.test(app.innerHTML); }
       if (gesperrt()) { console.log('FEHLER: Übernehmen gesperrt im Genau-Modus'); process.exit(1); }
-      // Umkreis (seit 3.3): nur auf Knopfdruck, Ausstieg muss bewusst gewählt werden
+      // Umkreis (seit 0.33): nur auf Knopfdruck, Ausstieg muss bewusst gewählt werden
       klicke({ 'data-a': 'umkreis' });
       warte(function () { return ctx.e.rkU && !ctx.e.rkU.lade; }, function () {
         var l = ctx.e.rkU.liste;
@@ -56,11 +65,14 @@ warte(function () { return ctx.e && ctx.e.suche && ctx.e.suche.length; }, functi
         klicke({ 'data-a': 'aus', 'data-i': String(zi) });
         if (gesperrt()) { console.log('FEHLER: Übernehmen trotz Ausstieg gesperrt'); process.exit(1); }
         klicke({ 'data-a': 'umkreisWert', value: '2000' });
+        klicke({ 'data-a': 'quelleWert', value: 'trans' });
+        klicke({ 'data-a': 'abfahrtWert', value: 'aktuell' });
+        klicke({ 'data-a': 'dauerWert', checked: false });
         klicke({ 'data-a': 'uebernehmen' });
         console.log('Liste:', text().substring(0, 200));
         klicke({ 'data-a': 'speichern' });
         console.log('Ergebnis:', JSON.stringify(ergebnis));
-        if (!ergebnis.strecken[0].d || ergebnis.umkreis !== 2000) { console.log('FEHLER: d oder Umkreis fehlt'); process.exit(1); }
+        if (!ergebnis.strecken[0].d || ergebnis.umkreis !== 2000 || ergebnis.quelle !== 'trans' || ergebnis.abfahrt !== 'aktuell' || ergebnis.dauer !== 'aus') { console.log('FEHLER: d oder Umkreis fehlt'); process.exit(1); }
         console.log('Abfragen:', X.zaehler.n, '| Dauer:', Math.round((Date.now() - t0) / 1000) + ' s');
       });
     });
