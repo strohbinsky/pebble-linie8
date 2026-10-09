@@ -16,7 +16,7 @@ transfers. Every route is a pair of stops served by at least one line directly.
 Made together by **Seb & Claude** (Anthropic): ideas, design decisions and real-world testing by Seb,
 code, tests and documentation by Claude in pair-programming sessions.
 
-> **Status: beta, version 0.41.** Not yet tested in daily use — only in the emery emulator and with Node tests
+> **Status: beta, version 0.42.** Not yet tested in daily use — only in the emery emulator and with Node tests
 > against live data. Version numbers start with 0 until the app has proven itself on the street. Releases
 > published earlier as 3.2.0 to 3.4.0 are the same line of development (now 0.32 to 0.34).
 
@@ -26,10 +26,14 @@ code, tests and documentation by Claude in pair-programming sessions.
   <img src="docs/images/display-klar.png" width="200" alt="Klar view">
   &nbsp;
   <img src="docs/images/display-phosphor.png" width="200" alt="Phosphor view">
+  &nbsp;
+  <img src="docs/images/display-invers.png" width="200" alt="LED inverted view">
 </p>
 
-*Left: the default **LED view**, styled like a dot-matrix display at a bus stop. Middle: **Klar** ("clear")
-with system fonts on white. Right: **Phosphor**, radar green on black in a pixel font. Same data: line,
+*Left: the default **LED view**, styled like a dot-matrix display at a bus stop — white dots on black for maximum
+contrast (amber until 0.41). Middle: **Klar** ("clear")
+with system fonts on white. Third: **Phosphor**, radar green on black in a pixel font. Right: **LED inverted**, black dots on white
+for bright daylight. Same data: line,
 platform, scheduled time, delay (`+1'`), travel time to the destination (`7'`) and minutes until departure
 (`3'`) — with the delay included. The scheduled time stays as printed in the timetable; **the minutes until
 departure are the number to go by**.*
@@ -58,7 +62,8 @@ departure are the number to go by**.*
   (`10:43 +4'`). Alternative: the expected time with the delay already included (`10:47`), coloured in the
   Klar and Phosphor views. The minutes until departure always include the delay
 - **Minutes with a tick everywhere:** `13'` until departure, `+1'` delay, `7'` travel time
-- **Three views**, switchable on the phone or on the watch: LED (default), Klar and Phosphor
+- **Four views**, switchable on the phone or on the watch: LED (default, white on black), Klar, Phosphor and
+  LED inverted (black on white)
 - **Faster departure** (0.38–0.41): for the route on screen, the app looks for buses from any stop within the
   radius around your start that get you to the destination **earlier** — including a different line you did not
   have in mind. Walking is part of the comparison: to the new stop, from the alternative stop to your actual
@@ -159,7 +164,7 @@ Select; the others open a list.
 
 | Entry | Values | Default |
 | --- | --- | --- |
-| `ANSICHT` (view) | LED · Klar · Phosphor | LED |
+| `ANSICHT` (view) | LED · Klar · Phosphor · LED invers | LED |
 | `ABFAHRT` (departure time) | Fahrplan (scheduled) · aktuell (expected) | Fahrplan |
 | `FAHRTDAUER` (travel time) | an · aus | an |
 | `QUELLE` (source) | Auto · nur RMV · nur Transitous | Auto |

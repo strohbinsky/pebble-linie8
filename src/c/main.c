@@ -45,14 +45,15 @@ enum { L_HANDY, L_MENUE, L_AENDERN, L_EINST, L_ANSICHT, L_UMKREIS, L_QUELLE, L_S
 enum { QUELLE_AUTO = 0, QUELLE_RMV = 1, QUELLE_TRANS = 2 };                     // wie QUELLEN in index.js
 enum { ABF_PLAN = 0, ABF_AKTUELL = 1 };                                          // Abfahrtszeit: Fahrplan oder mit Verspätung
 enum { E_ANSICHT, E_ABFAHRT, E_DAUER, E_QUELLE, E_UMKREIS };                     // Reihenfolge im Menü Einstellungen
-enum { LAYOUT_LED = 0, LAYOUT_KLAR = 1, LAYOUT_PHOSPHOR = 2 };
+enum { LAYOUT_LED = 0, LAYOUT_KLAR = 1, LAYOUT_PHOSPHOR = 2, LAYOUT_INVERS = 3 };   // INVERS: LED schwarz auf Weiß (0.42)
+#define LAYOUT_OK(v) ((v) >= LAYOUT_LED && (v) <= LAYOUT_INVERS)
 enum { A_UNTERMENUE = 0, A_NEU = 1, A_AENDERN_RUECK = 2, A_AENDERN_START = 3, A_LOESCHEN = 4,
        A_WAHL = 5, A_ZURUECK = 6, A_LAYOUT = 7, A_UMKREIS = 8, A_QUELLE = 9, A_ABFAHRT = 10, A_DAUER = 11,
        A_SCHNELL_HIN = 12, A_SCHNELL_RUECK = 13,
        A_EINST = -1, A_ANSICHT = -2, A_SET_LED = -3, A_SET_KLAR = -4,
        A_UMK = -5, A_SET_U500 = -6, A_SET_U1000 = -7, A_SET_U2000 = -8, A_SET_PHOSPHOR = -9,
        A_QLL = -10, A_SET_QAUTO = -11, A_SET_QRMV = -12, A_SET_QTRANS = -13,
-       A_ABF_UM = -14, A_DAUER_UM = -15, A_SCHNELL = -16 };   // negative: nur auf der Uhr                        // AKTION an das Handy, wie in index.js
+       A_ABF_UM = -14, A_DAUER_UM = -15, A_SCHNELL = -16, A_SET_INVERS = -17 };   // negative: nur auf der Uhr                        // AKTION an das Handy, wie in index.js
 
 static Window *s_window;
 static Layer *s_layer;
@@ -815,16 +816,18 @@ static void zeichnen(Layer *layer, GContext *ctx) {
   const int oy = (b.size.h - ROWS * PITCH) / 2 + 1;
   raster_fuellen();
 
-  graphics_context_set_fill_color(ctx, GColorBlack);
+  // Seit 0.42 weiß statt orange (maximaler Kontrast); INVERS: schwarze Punkte auf Weiß. Gedimmt = Grau dazwischen
+  const bool inv = s_layout == LAYOUT_INVERS;
+  graphics_context_set_fill_color(ctx, inv ? GColorWhite : GColorBlack);
   graphics_fill_rect(ctx, b, 0, GCornerNone);
 
-  graphics_context_set_stroke_color(ctx, GColorFromHEX(0x550000));   // unbeleuchtete LED: 1 px
+  graphics_context_set_stroke_color(ctx, GColorFromHEX(inv ? 0xAAAAAA : 0x555555));   // unbeleuchtete LED: 1 px
   for (int y = 0; y < ROWS; y++)
     for (int x = 0; x < COLS; x++)
       if (!lit_get(x, y)) graphics_draw_pixel(ctx, GPoint(ox + x * PITCH, oy + y * PITCH));
 
   for (int hell = 0; hell < 2; hell++) {                            // leuchtende LED: 2 x 2 px, gedimmt oder hell
-    graphics_context_set_fill_color(ctx, GColorFromHEX(hell ? 0xFFAA00 : 0xAA5500));
+    graphics_context_set_fill_color(ctx, GColorFromHEX(hell ? (inv ? 0x000000 : 0xFFFFFF) : (inv ? 0x555555 : 0xAAAAAA)));
     for (int y = 0; y < ROWS; y++)
       for (int x = 0; x < COLS; x++)
         if (lit_get(x, y) && dim_get(x, y) != hell)
@@ -993,7 +996,8 @@ static void umkreis_text(char *buf, size_t n, const char *vor, int m) {   // "UM
 static void einstellungen_zeigen(int sel) {
   char buf[LTXT];
   liste_beginnen(L_EINST, T("EINSTELLUNGEN", "Einstellungen"));
-  eintrag(s_layout == LAYOUT_KLAR ? "Ansicht: Klar" : s_layout == LAYOUT_PHOSPHOR ? "ANSICHT: PHOSPHOR" : "ANSICHT: LED", A_ANSICHT);
+  eintrag(s_layout == LAYOUT_KLAR ? "Ansicht: Klar" : s_layout == LAYOUT_PHOSPHOR ? "ANSICHT: PHOSPHOR" :
+          s_layout == LAYOUT_INVERS ? "ANSICHT: LED INVERS" : "ANSICHT: LED", A_ANSICHT);
   eintrag(s_abfahrt == ABF_AKTUELL ? T("ABFAHRT: AKTUELL", "Abfahrt: aktuell") : T("ABFAHRT: FAHRPLAN", "Abfahrt: Fahrplan"), A_ABF_UM);
   eintrag(s_dauer ? T("FAHRTDAUER: AN", "Fahrtdauer: an") : T("FAHRTDAUER: AUS", "Fahrtdauer: aus"), A_DAUER_UM);
   eintrag(s_quelle == QUELLE_RMV ? T("QUELLE: NUR RMV", "Quelle: nur RMV") :
@@ -1031,6 +1035,7 @@ static void ansicht_zeigen(void) {                     // Auswahl der Ansicht, d
   eintrag("LED", A_SET_LED);
   eintrag(T("KLAR", "Klar"), A_SET_KLAR);
   eintrag(T("PHOSPHOR", "Phosphor"), A_SET_PHOSPHOR);
+  eintrag(T("LED INVERS", "LED invers"), A_SET_INVERS);   // Index = LAYOUT_INVERS
   s_lsel = s_layout;
   lauf_starten();
   layer_mark_dirty(s_layer);
@@ -1066,7 +1071,7 @@ static void aktion_senden(int aktion, int wahl) {      // mit Antwort vom Handy:
 }
 
 static void layout_setzen(int v) {
-  s_layout = (v == LAYOUT_KLAR || v == LAYOUT_PHOSPHOR) ? v : LAYOUT_LED;
+  s_layout = LAYOUT_OK(v) ? v : LAYOUT_LED;
   persist_write_int(PK_LAYOUT, s_layout);
 }
 
@@ -1183,6 +1188,7 @@ static void liste_waehlen(void) {
   else if (a == A_SET_LED) layout_waehlen(LAYOUT_LED);
   else if (a == A_SET_KLAR) layout_waehlen(LAYOUT_KLAR);
   else if (a == A_SET_PHOSPHOR) layout_waehlen(LAYOUT_PHOSPHOR);
+  else if (a == A_SET_INVERS) layout_waehlen(LAYOUT_INVERS);
   else if (a == A_UMK) umkreis_zeigen();
   else if (a == A_SET_U500) umkreis_waehlen(500);
   else if (a == A_SET_U1000) umkreis_waehlen(1000);
@@ -1324,7 +1330,7 @@ static void init(void) {
   app_message_open(ein < 2048 ? ein : 2048, 64);
   if (persist_exists(PK_LAYOUT)) {
     const int v = persist_read_int(PK_LAYOUT);
-    s_layout = (v == LAYOUT_KLAR || v == LAYOUT_PHOSPHOR) ? v : LAYOUT_LED;
+    s_layout = LAYOUT_OK(v) ? v : LAYOUT_LED;
   }
   if (persist_exists(PK_UMKREIS)) umkreis_setzen(persist_read_int(PK_UMKREIS));
   if (persist_exists(PK_QUELLE)) quelle_setzen(persist_read_int(PK_QUELLE));

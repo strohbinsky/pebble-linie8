@@ -65,6 +65,11 @@ pruefe(speicher.layout === 'led', 'Handy: Umschalten an der Uhr (AKTION 7) gespe
 lauscher.appmessage({ payload: { AKTION: 7, WAHL: 2 } });
 await warte();
 pruefe(speicher.layout === 'phosphor', 'Handy: Phosphor an der Uhr (AKTION 7, WAHL 2) gespeichert');
+lauscher.appmessage({ payload: { AKTION: 7, WAHL: 3 } });
+await warte();
+pruefe(speicher.layout === 'invers', 'Handy: LED invers an der Uhr (AKTION 7, WAHL 3) gespeichert');
+lauscher.appmessage({ payload: { AKTION: 7, WAHL: 2 } });
+await warte();
 gesendet = []; lauscher.ready();
 await warte();
 pruefe(gesendet[0][keys.LAYOUT] === 2, 'Handy: Einrichtung mit LAYOUT = 2 (Phosphor)');

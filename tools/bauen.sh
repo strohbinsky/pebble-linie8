@@ -35,6 +35,14 @@ if [ -s "$SCHLUESSEL" ] && unzip -p build/*.pbw | grep -qaF -f "$SCHLUESSEL"; th
   echo "ABBRUCH: RMV-Schlüssel steckt in der gebauten App — nicht kopiert"
   exit 1
 fi
+# Quellkarte (Debug) raus: enthält Build-Pfade mit dem Benutzernamen des Rechners, die App braucht sie nicht
+zip -q -d build/*.pbw pebble-js-app.js.map >/dev/null 2>&1 || true
+# Sperre gegen persönliche Daten (Begriffsliste außerhalb des Repos), falls auf diesem Rechner eingerichtet
+if [ -x "$HOME/.local/bin/github-sperre" ] && ! "$HOME/.local/bin/github-sperre" build/*.pbw >/dev/null; then
+  echo "ABBRUCH: github-sperre schlägt bei der gebauten App an — nicht kopiert"
+  "$HOME/.local/bin/github-sperre" build/*.pbw
+  exit 1
+fi
 mkdir -p "${AUSGABE:h}"
 cp build/*.pbw "$AUSGABE"
 case "$1" in

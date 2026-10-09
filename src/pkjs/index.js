@@ -69,7 +69,7 @@ function holen(von, nach, linien, fertig, max) {   // max: so viele Fahrten (Sta
   var xhr = new XMLHttpRequest();
   xhr.open('GET', url, true);
   // Transitous lehnt Anfragen ohne User-Agent mit 403 ab.
-  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/0.41 (privat)'); } catch (e) {}
+  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/0.42 (privat)'); } catch (e) {}
   xhr.onload = function () {
     if (xhr.status !== 200) { console.log('HTTP ' + xhr.status); return ende(STATUS_FEHLER); }
     try {
@@ -223,9 +223,9 @@ function umkreis() {
 }
 function umkreisText(m) { return m >= 1000 ? (m / 1000) + T('KM', ' km') : m + T('M', ' m'); }
 
-// Ansicht: 'led' (Standard), 'klar' oder 'phosphor'. Einstellbar am Handy (Seite) und an der Uhr (Menü Einstellungen).
+// Ansicht: 'led' (Standard), 'klar', 'phosphor' oder 'invers' (LED schwarz auf Weiß, seit 0.42). Einstellbar am Handy (Seite) und an der Uhr (Menü Einstellungen).
 // Phosphor nutzt die LED-Texte (Großbuchstaben ohne Umlaute), nur Klar die normale Schreibweise.
-var LAYOUTS = ['led', 'klar', 'phosphor'];   // Index = LAYOUT/WAHL an der Uhr
+var LAYOUTS = ['led', 'klar', 'phosphor', 'invers'];   // Index = LAYOUT/WAHL an der Uhr
 function layout() { var v = localStorage.getItem('layout'); return LAYOUTS.indexOf(v) >= 0 ? v : 'led'; }
 function T(led, klar) { return layout() === 'klar' ? klar : led; }   // Text je nach Ansicht
 
@@ -365,7 +365,7 @@ function transitousHolen(pfad, fertig) {
   function ende(f, d) { if (!erledigt) { erledigt = true; fertig(f, d); } }
   var xhr = new XMLHttpRequest();
   xhr.open('GET', 'https://api.transitous.org/api/' + pfad, true);
-  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/0.41 (privat)'); } catch (e) {}
+  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/0.42 (privat)'); } catch (e) {}
   xhr.onload = function () {
     if (xhr.status !== 200) return ende('HTTP ' + xhr.status);
     try { ende(null, JSON.parse(xhr.responseText)); } catch (e) { ende('Antwort unlesbar'); }

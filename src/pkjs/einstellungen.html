@@ -50,7 +50,7 @@ var ansicht = 'liste';             // 'liste' oder 'editor'
 var e = null;                      // Entwurf der Strecke im Editor
 var rmvKey = (ZUSTAND && ZUSTAND.rmvKey) || '';
 var rmvTest = '';
-var layout = ['klar', 'phosphor'].indexOf(ZUSTAND && ZUSTAND.layout) >= 0 ? ZUSTAND.layout : 'led';   // Ansicht auf der Uhr
+var layout = ['klar', 'phosphor', 'invers'].indexOf(ZUSTAND && ZUSTAND.layout) >= 0 ? ZUSTAND.layout : 'led';   // Ansicht auf der Uhr
 var umkreisWert = L.UMKREISE.indexOf(ZUSTAND && ZUSTAND.umkreis) >= 0 ? ZUSTAND.umkreis : 1000;   // Umkreis um den Start
 var abfahrtWert = (ZUSTAND && ZUSTAND.abfahrt) === 'aktuell' ? 'aktuell' : 'plan';   // Abfahrtszeit auf der Uhr
 var dauerWert = (ZUSTAND && ZUSTAND.dauer) === 'aus' ? 'aus' : 'an';                // Fahrtdauer auf der Uhr
@@ -93,8 +93,8 @@ function vorschau(canvas, text) {
   else { var x0 = 1 - (lauf % periode); setzen(x0); setzen(x0 + periode); }
   for (var y = 0; y < 7; y++)
     for (var k = 0; k < COLS; k++) {
-      if (an[k + ',' + y]) { c.fillStyle = '#FFAA00'; c.fillRect(k * P, y * P, P - 2, P - 2); }
-      else { c.fillStyle = '#550000'; c.fillRect(k * P, y * P, 2, 2); }
+      if (an[k + ',' + y]) { c.fillStyle = '#FFFFFF'; c.fillRect(k * P, y * P, P - 2, P - 2); }
+      else { c.fillStyle = '#555555'; c.fillRect(k * P, y * P, 2, 2); }
     }
 }
 
@@ -117,7 +117,8 @@ function zeigeListe() {
   if (strecken.length < MAXS) h += '<button data-a="neu">+ Strecke hinzufügen</button>';
   // Reihenfolge wie im Uhr-Menü Einstellungen: Anzeige, Datenquelle, Rückfahrt-Suche
   h += '<h2>Anzeige auf der Uhr</h2><h3>Ansicht</h3>' +
-    [['led', 'LED-Haltestellenanzeige', 'Standard. Orange Punkte auf Schwarz, wie am Bahnsteig'],
+    [['led', 'LED-Haltestellenanzeige', 'Standard. Weiße Punkte auf Schwarz, maximaler Kontrast'],
+     ['invers', 'LED invers', 'Schwarze Punkte auf Weiß, für helles Tageslicht'],
      ['klar', 'Klar', 'Weiß, Systemschrift, Linie als rotes Kästchen, Namen mit Umlauten'],
      ['phosphor', 'Phosphor', 'Radar-Grün auf Schwarz, Pixelschrift wie das Watchface Phosphor']].map(function (v) {
       return '<label class="zeile"><input type="radio" name="layout" data-a="layout" value="' + v[0] + '"' + (layout === v[0] ? ' checked' : '') + '>' +
@@ -541,7 +542,7 @@ document.addEventListener('click', function (ev) {
   if (a === 'loeschen') { if (confirm('Strecke löschen?')) { strecken.splice(i, 1); } return zeigeListe(); }
   if (a === 'hoch' && i > 0) { strecken.splice(i - 1, 0, strecken.splice(i, 1)[0]); return zeigeListe(); }
   if (a === 'runter' && i < strecken.length - 1) { strecken.splice(i + 1, 0, strecken.splice(i, 1)[0]); return zeigeListe(); }
-  if (a === 'layout') { layout = ['klar', 'phosphor'].indexOf(el.value) >= 0 ? el.value : 'led'; return; }
+  if (a === 'layout') { layout = ['klar', 'phosphor', 'invers'].indexOf(el.value) >= 0 ? el.value : 'led'; return; }
   if (a === 'speichern') return schliessen({ strecken: strecken, rmvKey: rmvKey, layout: layout, umkreis: umkreisWert, quelle: quelleWert, abfahrt: abfahrtWert, dauer: dauerWert });
   if (a === 'rmvTest') return rmvPruefen();
   if (a === 'abbrechen') return schliessen({ abbruch: true });
