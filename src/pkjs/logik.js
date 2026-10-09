@@ -7,7 +7,7 @@ function Logik(holenRoh, schrift) {
   var COLS = 66;               // Breite des LED-Rasters auf der Uhr
   var UMKREIS_B = 2000;        // Rückfahrt: Einstieg bis 2 km um das Ziel (Bummeln)
   var GENAU_R = 300;           // Rückfahrt genau zum Start: Ankünfte in 300 m abfragen …
-  var GENAU_M = 150;           // … und gleichen Namen oder bis 150 m als Start zählen
+  var GENAU_M = 150;           // … und gleichen Namen oder bis 150 m als Start zählen (auch: Schnellere Abfahrt)
   var UMKREISE = [500, 1000, 2000];   // wählbarer Umkreis um den Start (Einstellungen), Standard 1000
   var GLEICHZEITIG = 4;        // so viele Abfragen parallel (Transitous drosselt bei mehr, HTTP 429)
   var cacheErreichbar = {};    // Start-ID -> Ergebnis
@@ -195,6 +195,60 @@ function Logik(holenRoh, schrift) {
         fertig(null, erg);
       });
     });
+  }
+
+  // ---------- Erreichbare Ziele ab allen Haltestellen im Umkreis (seit 0.37) ----------
+  // Eine Abfrage: Abfahrten an allen Haltestellen im Kreis um den Standort, mit Folgehalten (v6 fetchStops).
+  // Wie erreichbar(), dazu je Ziel z.ab: die Start-Haltestellen im Umkreis, von denen es direkt hingeht (mit Linien,
+  // Steig-Kennung der Abfahrt, Entfernung zum Standort). Zeitfenster kurz, sonst wird die Antwort groß:
+  // 1 km um eine Innenstadt-Haltestelle, 30 min: 3 MB, 0,4 s; 2 km, 15 min: 4 MB (geprüft 2026-10-08). Abends zusätzlich Mittag.
+  function erreichbarUm(lat, lon, radius, fertig) {
+    var ck = 'um|' + lat.toFixed(3) + ',' + lon.toFixed(3) + '|' + radius;
+    if (cacheErreichbar[ck]) return fertig(null, cacheErreichbar[ck]);
+    var h = (new Date().getUTCHours() + 2) % 24, zeiten = [null], fenster = radius > 1000 ? 900 : 1800;
+    if (h >= 20 || h < 6) zeiten.push(morgenMittag());
+    var offen = zeiten.length, alle = [], fehler = null;
+    zeiten.forEach(function (zeit) {
+      holen('v6/stoptimes?center=' + lat.toFixed(6) + ',' + lon.toFixed(6) + '&radius=' + radius + '&exactRadius=true' +
+            '&fetchStops=true&n=50&window=' + fenster + (zeit ? '&time=' + zeit : ''), function (f, d) {
+        if (f) fehler = f;
+        else alle = alle.concat((d && d.stopTimes) || []);
+        if (--offen) return;
+        if (fehler && !alle.length) return fertig(fehler);
+        if (alle.length && !alle.some(function (x) { return x.nextStops; })) return fertig('ohne Folgehalte');
+        var erg = { linien: {}, ziele: {}, fahrten: {}, starts: {} };
+        alle.forEach(function (x) {
+          if (!oepnv(x) || !x.place || x.place.pickupType === 'NOT_ALLOWED') return;
+          var halte = x.nextStops || [], namen = [], p = x.place, ks = namensSchluessel(p.name), l = x.routeShortName;
+          if (!halte.length) return;
+          var s = erg.starts[ks];
+          if (!s) s = erg.starts[ks] = { name: p.name, m: entfernung(lat, lon, p.lat, p.lon) };
+          if (p.name.indexOf(',') < 0) s.name = p.name;             // "Wiesbaden Luisenplatz" vor "Wiesbaden, Luisenplatz"
+          erg.linien[l] = 1;
+          halte.forEach(function (hh) {
+            if (namensSchluessel(hh.name) === ks) return;
+            var z = erg.ziele[hh.name] || (erg.ziele[hh.name] = { name: hh.name, id: hh.stopId, lat: hh.lat, lon: hh.lon, linien: {}, hin: false, rueck: false, ab: {} });
+            z.linien[l] = 1;
+            z.hin = true;
+            var e = z.ab[ks] || (z.ab[ks] = { id: p.stopId, lat: p.lat, lon: p.lon, m: entfernung(lat, lon, p.lat, p.lon), linien: {}, start: s });
+            e.linien[l] = 1;
+            namen.push(hh.name);
+          });
+          fahrtMerken(erg, x, namen);
+        });
+        cacheErreichbar[ck] = erg;
+        fertig(null, erg);
+      });
+    });
+  }
+
+  // Start-Haltestellen im Umkreis für ein Ziel aus erreichbarUm, nächste zuerst; linie '*' oder leer = alle
+  function einstiegeUm(z, linie) {
+    return Object.keys(z.ab || {}).map(function (k) {
+      var e = z.ab[k];
+      return { id: e.id, name: e.start.name, lat: e.lat, lon: e.lon, m: e.m, linien: Object.keys(e.linien).sort(sortDe) };
+    }).filter(function (e) { return !linie || linie === '*' || e.linien.indexOf(linie) >= 0; })
+      .sort(function (x, y) { return x.m - y.m; });
   }
 
   function erreichbarAlt(start, fortschritt, fertig) {
@@ -416,12 +470,85 @@ function Logik(holenRoh, schrift) {
     }).sort(function (x, y) { return x.m - y.m; });
   }
 
+  // ---------- Schnellere Abfahrt (seit 0.38) ----------
+  // Zu einer angezeigten Fahrt x -> y: Fahrten ab allen Haltestellen im Umkreis um x, die an einer Haltestelle im
+  // Umkreis um y FRÜHER ankommen als die Bezugsfahrt (die nächste angezeigte). Eine Abfrage wie erreichbarUm
+  // (v6/stoptimes, center + radius, Folgehalte mit Ankunftszeit), nur Fahrplan.
+  //   bezug  { ab, an, linie, plan } UTC-Sekunden (plan = Abfahrt laut Fahrplan, an = 0: unbekannt) oder null = keine Fahrt
+  //   pos    Standort {lat, lon} oder null (= x): Entfernung zum Einstieg und Gehzeit (nicht erreichbare Abfahrten fallen weg)
+  //   jetzt  UTC-Sekunden
+  // Früher = Ankunft am Ausstieg plus Fußweg zu y (GEHEN) vor der Ankunft der Bezugsfahrt an y.
+  // Ergebnis [{id, name, lat, lon, m, ziele: [{id, name, lat, lon, m, ziel, fahrten: [{l, ab, an, am}]}]}], am = an y zu Fuß;
+  //   Einstiege nach Entfernung vom Standort; Ziele: y selbst zuerst, sonst nach Entfernung zu y; Fahrten nach am.
+  // Die Bezugsfahrt selbst fällt heraus, auch wo sie im Umkreis an anderen Haltestellen hält (gleiche tripId).
+  // 50 m Luftlinie je Minute = 3 km/h Luftlinie, mit ~30 % Umweg auf echten Wegen etwa 4 km/h (Seb 2026-10-09;
+  // bis 0.40: 65 m/min, real eher 5 km/h). Kein Puffer am Einstieg: ankommen zur Abfahrt reicht.
+  var GEHEN = 50;
+  // Standort für die Gehzeit: weit weg (Planung vorab, unterwegs woanders) oder unbekannt -> null = man steht an x
+  function standortNah(pos, x, radius) { return pos && entfernung(pos.lat, pos.lon, x.lat, x.lon) <= radius + 1000 ? pos : null; }
+  function gehSek(m) { return Math.round(m / GEHEN * 60); }
+  function schneller(x, y, radius, bezug, pos, jetzt, fertig) {
+    // Standort weit weg (unterwegs woanders, Planung vorab): ab x rechnen, sonst fiele jede Abfahrt der Gehzeit zum Opfer
+    pos = standortNah(pos, x, radius);
+    var kx = namensSchluessel(x.name), ky = namensSchluessel(y.name), von = pos || x;
+    var fenster = Math.max(600, Math.min(radius > 1000 ? 1800 : 3600, bezug && bezug.an ? bezug.an - jetzt : 3600));
+    function istX(p) { return namensSchluessel(p.name) === kx || entfernung(x.lat, x.lon, p.lat, p.lon) <= GENAU_M; }
+    function istY(p) { return namensSchluessel(p.name) === ky || entfernung(y.lat, y.lon, p.lat, p.lon) <= GENAU_M; }
+    function zeit(s) { var t = Date.parse(s); return isNaN(t) ? 0 : Math.floor(t / 1000); }
+    holen('v6/stoptimes?center=' + x.lat.toFixed(6) + ',' + x.lon.toFixed(6) + '&radius=' + radius + '&exactRadius=true' +
+          '&fetchStops=true&n=50&window=' + Math.round(fenster), function (f, d) {
+      if (f) return fertig(f);
+      var st = (d && d.stopTimes) || [];
+      if (st.length && !st.some(function (s) { return s.nextStops; })) return fertig('ohne Folgehalte');
+      // Bezugsfahrt erkennen: an x, gleiche Linie, Fahrplan-Abfahrt bis 2 min daneben
+      var bezugTrips = {};
+      if (bezug) st.forEach(function (s) {
+        var p = s.place;
+        var kurz = String(s.routeShortName).toUpperCase().replace(/[^A-Z0-9]/g, '').substring(0, 4);   // wie linienKurz
+        if (!p || !oepnv(s) || !istX(p) || (s.routeShortName !== bezug.linie && kurz !== bezug.linie)) return;
+        if (Math.abs(zeit(p.scheduledDeparture || p.departure) - bezug.plan) <= 120) bezugTrips[s.tripId] = 1;
+      });
+      var je = {}, grenze = bezug && bezug.an ? bezug.an : Infinity;   // Dauer unbekannt: nur die Bezugsfahrt fällt weg
+      st.forEach(function (s) {
+        var p = s.place;
+        if (!oepnv(s) || !p || p.pickupType === 'NOT_ALLOWED' || p.cancelled || s.tripCancelled || bezugTrips[s.tripId]) return;
+        var ab = zeit(p.departure), m = entfernung(von.lat, von.lon, p.lat, p.lon);
+        if (!ab || ab < jetzt + gehSek(m)) return;   // zu Fuß nicht mehr zu schaffen
+        var kp = namensSchluessel(p.name);
+        (s.nextStops || []).forEach(function (h) {
+          if (h.dropoffType === 'NOT_ALLOWED' || h.cancelled) return;
+          var an = zeit(h.arrival || h.scheduledArrival), kh = namensSchluessel(h.name), ziel = istY(h);
+          var mz = ziel ? 0 : entfernung(y.lat, y.lon, h.lat, h.lon);
+          // Früher heißt: früher AM ZIEL — Ankunft plus Fußweg vom Ausstieg zum Ziel (seit 0.40). Sonst gewinnt ein Bus in
+          // die Gegenrichtung, der 870 m neben dem Ziel hält (gesehen 2026-10-09 auf einer Teststrecke)
+          var am = an + gehSek(mz);
+          if (!an || am >= grenze || mz > radius || kh === kp) return;
+          var e = je[kp];
+          if (!e || m < e.m) e = je[kp] = { id: p.stopId, name: p.name, lat: p.lat, lon: p.lon, m: m, ziele: e ? e.ziele : {} };
+          if (p.name.indexOf(',') < 0) e.name = p.name;     // "Wiesbaden Luisenplatz" vor "Wiesbaden, Luisenplatz"
+          var z = e.ziele[kh];
+          if (!z || mz < z.m) z = e.ziele[kh] = { id: h.stopId, name: h.name, lat: h.lat, lon: h.lon, m: mz, ziel: ziel, fahrten: z ? z.fahrten : {} };
+          z.fahrten[s.routeShortName + '|' + ab + '|' + an] = { l: s.routeShortName, ab: ab, an: an, am: am };
+        });
+      });
+      fertig(null, Object.keys(je).map(function (k) {
+        var e = je[k];
+        e.ziele = Object.keys(e.ziele).map(function (k2) {
+          var z = e.ziele[k2];
+          z.fahrten = Object.keys(z.fahrten).map(function (k3) { return z.fahrten[k3]; }).sort(function (a, b) { return (a.am - b.am) || (a.ab - b.ab); });
+          return z;
+        }).sort(function (a, b) { return (b.ziel - a.ziel) || (a.m - b.m); });
+        return e;
+      }).sort(function (a, b) { return a.m - b.m; }));
+    });
+  }
+
   return {
-    COLS: COLS, UMKREIS_B: UMKREIS_B, GENAU_R: GENAU_R, UMKREISE: UMKREISE,
+    COLS: COLS, UMKREIS_B: UMKREIS_B, GENAU_R: GENAU_R, UMKREISE: UMKREISE, schneller: schneller, standortNah: standortNah, gehSek: gehSek,
     sortDe: sortDe, entfernung: entfernung, ledText: ledText, breite: breite, stadtVon: stadtVon, kurzname: kurzname,
     klarname: klarname, utf8Kuerzen: utf8Kuerzen, oepnv: oepnv,
     haltestellenUm: haltestellenUm, naechsteHaltestellen: naechsteHaltestellen,
-    erreichbar: erreichbar, zieleHin: zieleHin, richtungen: richtungen, direkt: direkt, ankunftUm: ankunftUm, rueckKandidaten: rueckKandidaten
+    erreichbar: erreichbar, erreichbarUm: erreichbarUm, einstiegeUm: einstiegeUm, zieleHin: zieleHin, richtungen: richtungen, direkt: direkt, ankunftUm: ankunftUm, rueckKandidaten: rueckKandidaten
   };
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = Logik;

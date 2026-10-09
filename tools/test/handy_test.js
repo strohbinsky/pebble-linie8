@@ -171,6 +171,126 @@ dann(function (w) { aktion(10, 1); aktion(11, 0); setTimeout(function () {
 console.log('== 6 Löschen Strecke 1');
 dann(function (w) { aktion(4, 0); w(); });
 einrichtungDa(1);
+function aufsteigendM() {              // Einstieg im Umkreis: nächste Haltestelle zuerst
+  var m = uhr.liste.texte.map(function (t) { var x = / (\d+)M$/.exec(t); return x ? +x[1] : -1; });
+  if (m.some(function (v) { return v < 0; })) { console.log('FEHLER: Einstieg ohne Meterangabe'); process.exit(1); }
+  for (var i = 1; i < m.length; i++) if (m[i] < m[i - 1]) { console.log('FEHLER: Einstieg nicht nach Entfernung sortiert'); process.exit(1); }
+}
+console.log('== 7 Neue Fahrt IM UMKREIS (seit 0.37), am Kurhaus, Linie 8, Einstieg nach Entfernung, zurück zum Ziel, andere Wahl');
+dann(function (w) { standort = KURHAUS; aktion(1); w(); });
+erwarte('START', /^IM UMKREIS 1KM$/, function () { if (uhr.liste.texte[0] !== 'IM UMKREIS 1KM') { console.log('FEHLER: IM UMKREIS nicht oben'); process.exit(1); } });
+erwarte('LINIE', /^8$/, function () { console.log('  ' + (uhr.liste.n - 1) + ' Linien im Umkreis'); });
+alleHalteFallsRichtung();
+erwarte('ZIEL', /./);
+erwarte('EINSTIEG', null, aufsteigendM);
+zurueckBis('ZIEL');
+dann(function (w) { var t = uhr.liste.texte; console.log('  -> wähle ' + t[t.length - 1]); aktion(5, t.length - 1); w(); });
+erwarte('EINSTIEG', /./, aufsteigendM);
+erwarte(/^(ZURUECK AB ZIEL\?|RUECKFAHRT AB|NICHTS NACH .*)$/, /^(JA|OHNE RUECKFAHRT|.* \d+M|.*\(ZIEL\))$/);
+einrichtungDa(2);
+dann(function (w) { var st = strecken()[1]; if (!st || !st.a || !st.a.id) { console.log('FEHLER: Start nicht gespeichert'); process.exit(1); } console.log('  Strecke 2 ab ' + st.a.kurz + ' (' + st.a.id + ')'); w(); });
+console.log('== 7b IM UMKREIS am Hbf, alle Linien, Buchstabe, Einstieg');
+dann(function (w) { standort = HBF; aktion(1); w(); });
+erwarte('START', /^IM UMKREIS/);
+erwarte('LINIE', /^ALLE LINIEN$/, function () { console.log('  ' + (uhr.liste.n - 1) + ' Linien im Umkreis'); });
+erwarte('ZIEL A-Z', /^S \(/);
+erwarte('ZIEL', /./);
+erwarte('EINSTIEG', /./, aufsteigendM);
+erwarte(/^(ZURUECK AB ZIEL\?|RUECKFAHRT AB|NICHTS NACH .*)$/, /^(JA|OHNE RUECKFAHRT|.* \d+M|.*\(ZIEL\))$/);
+einrichtungDa(3);
+function nachMeter() {                  // Einstieg: nach Entfernung vom Standort (0 m ohne Angabe)
+  var m = uhr.liste.texte.map(function (t) { var x = / (\d+)M$/.exec(t); return x ? +x[1] : 0; });
+  for (var i = 1; i < m.length; i++) if (m[i] < m[i - 1]) { console.log('FEHLER: nicht nach Entfernung sortiert'); process.exit(1); }
+}
+function fahrtenPruefen() {             // "8 10:27-10:32": Ankunft vor der Bezugsankunft im Titel, nach Ankunft sortiert
+  var bez = /AN (\d\d:\d\d)$/.exec(uhr.liste.titel), an = uhr.liste.texte.map(function (t) {
+    var x = /^\S+ (\d\d:\d\d)-(\d\d:\d\d)$/.exec(t);
+    if (!x) { console.log('FEHLER: Fahrt unlesbar: ' + t); process.exit(1); }
+    return x[2];
+  });
+  // über Mitternacht hinweg nicht prüfbar, dann nur Hinweis
+  if (bez && an.some(function (x) { return x >= bez[1]; })) console.log('  Hinweis: Ankunft nicht vor ' + bez[1] + ' (Mitternacht?)');
+  for (var i = 1; i < an.length; i++) if (an[i] < an[i - 1]) console.log('  Hinweis: Ankunft nicht aufsteigend (Mitternacht?)');
+}
+function schnellDurchlauf(aktionNr, seite, uebernehmen) {
+  dann(function (w) { aktion(aktionNr, seite); w(); });
+  dann(function (w) { warte(function () { return listeDa('SCHNELLER AB')() || listeDa('NICHTS SCHNELLER')() || listeDa('KEINE RUECKFAHRT')(); }, function () {
+    console.log(zeige());
+    if (uhr.liste.titel !== 'SCHNELLER AB') { var e0 = uhr.ende; aktion(6); return warte(function () { return uhr.ende > e0; }, w); }
+    nachMeter();
+    waehle(/./);
+    warte(listeDa('AUSSTIEG'), function () {
+      console.log(zeige());
+      var t0 = uhr.liste.texte[0];
+      if (uhr.liste.texte.slice(1).some(function (t) { return /\(ZIEL\)$/.test(t); })) { console.log('FEHLER: Ziel nicht oben'); process.exit(1); }
+      waehle(/./);
+      warte(listeDa(/^BISHER /), function () {
+        console.log(zeige());
+        fahrtenPruefen();
+        var fahrt = uhr.liste.texte[0];
+        waehle(/./);
+        warte(listeDa(fahrt), function () {           // Mini-Menü: Titel = gewählte Fahrt, ZURUECK vorausgewählt (oben)
+          console.log(zeige());
+          if (uhr.liste.texte.join('|') !== 'ZURUECK|UEBERNEHMEN') { console.log('FEHLER: Mini-Menü falsch'); process.exit(1); }
+          if (!uebernehmen) {
+            var e0 = uhr.ende;
+            waehle(/^ZURUECK$/);
+            return warte(function () { return uhr.ende > e0; }, function () { console.log('  Zurück -> Anzeige, ohne Änderung'); w(); });
+          }
+          var vorher = strecken()[seite], n0 = uhr.abfahrten.length, linie = fahrt.split(' ')[0];
+          uhr.einrichtung = null;
+          waehle(/^UEBERNEHMEN$/);
+          warte(function () { return uhr.einrichtung && !uhr.liste && uhr.abfahrten.length > n0; }, function () {
+            var st = strecken()[seite], a = uhr.abfahrten[uhr.abfahrten.length - 1], r = aktionNr === 13;
+            console.log('  übernommen: hin ' + st.a.kurz + ' -> ' + st.b.kurz + ' [' + (st.linienHin || st.linien) + '] | rück ' + (st.c || st.b).kurz + ' -> ' + (st.d || st.a).kurz + ' [' + (st.linienRueck || st.linien) + ']');
+            var t = r ? 'RUECK' : 'HIN', l0 = a[t + '_L[0]'];
+            console.log('  Abfahrten ' + t + ': ' + [0, 1, 2].map(function (j) { return a[t + '_L[' + j + ']'] + '@' + (a[t + '[' + j + ']'] ? new Date(a[t + '[' + j + ']'] * 1000).toISOString().substring(11, 16) + 'Z' : '-'); }).join(' '));
+            if ((r ? st.linienRueck : st.linienHin).join() !== linie) { console.log('FEHLER: Linie nicht übernommen'); process.exit(1); }
+            if (l0 && l0 !== linie.substring(0, 4)) { console.log('FEHLER: fremde Linie in der Anzeige: ' + l0); process.exit(1); }
+            function filter(x, rr) { var o = rr ? x.linienRueck : x.linienHin; return String((o && o.length) ? o : (x.alle ? null : x.linien)); }
+            if (filter(st, !r) !== filter(vorher, !r)) { console.log('FEHLER: Linienfilter der anderen Richtung geändert: ' + filter(vorher, !r) + ' -> ' + filter(st, !r)); process.exit(1); }
+            if (r && st.a.id !== vorher.a.id) { console.log('FEHLER: Rück übernommen, Hinstart geändert'); process.exit(1); }
+            if (!r && (st.c || st.b).id !== (vorher.c || vorher.b).id) { console.log('FEHLER: Hin übernommen, Rückstart geändert'); process.exit(1); }
+            if (!r && (st.d || st.a).name !== (vorher.d || vorher.a).name) { console.log('FEHLER: Hin übernommen, Rückziel geändert'); process.exit(1); }
+            w();
+          });
+        });
+      });
+    });
+  }); });
+}
+console.log('== 8 Schnellere Abfahrt (seit 0.38): Beispielstrecke Hbf -> Kurhaus/Theater nur Linie 8, ohne Koordinaten');
+dann(function (w) {
+  var l = strecken();
+  l.push({ a: { id: 'de-DELFI_de:06414:6907', name: 'Wiesbaden Hauptbahnhof', kurz: 'HAUPTBAHNHOF' },
+           b: { id: 'de-DELFI_de:06414:25411:1:1', name: 'Wiesbaden Kurhaus/Theater', kurz: 'KURHAUS/THEATER' },
+           c: null, ohneRueck: true, alle: false, linien: ['8'] });
+  speicher.strecken = JSON.stringify(l); standort = HBF; w();
+});
+schnellDurchlauf(12, 3);
+console.log('== 8b Rück ohne Rückfahrt -> KEINE RUECKFAHRT, Zurück');
+schnellDurchlauf(13, 3);
+console.log('== 8c Hin und Rück auf Strecke 1, Standort Kurhaus');
+dann(function (w) { standort = KURHAUS; w(); });
+schnellDurchlauf(12, 0);
+schnellDurchlauf(13, 0);
+console.log('== 8d Standort weit weg (Frankfurt): Rechnung ab dem Start, Liste nicht leer');
+dann(function (w) { standort = { lat: 50.107, lon: 8.663 }; w(); });
+schnellDurchlauf(12, 3);
+console.log('== 8f Bezug (seit 0.41): erste Fahrt, die man zu Fuß erreicht, 50 m Luftlinie je Minute');
+dann(function (w) {
+  var j = Math.floor(Date.now() / 1000), x = { lat: 50.0707, lon: 8.2436 }, liste = [{ ab: j + 120 }, { ab: j + 900 }];
+  var weg = { lat: 50.0707 + 500 / 111320, lon: 8.2436 };          // 500 m nördlich: 10 min zu Fuß
+  var b1 = ctx.bezugWaehlen(liste, null, x), b2 = ctx.bezugWaehlen(liste, weg, x), b3 = ctx.bezugWaehlen(liste, { lat: 50.2, lon: 8.2436 }, x);
+  console.log('  ohne Standort ' + (b1 && b1.ab - j) + ' s, 500 m weg ' + (b2 && b2.ab - j) + ' s, weit weg ' + (b3 && b3.ab - j) + ' s');
+  if (!b1 || b1.ab !== j + 120 || !b2 || b2.ab !== j + 900 || !b3 || b3.ab !== j + 120) { console.log('FEHLER: Bezugswahl'); process.exit(1); }
+  if (ctx.bezugWaehlen([{ ab: j + 120 }], weg, x) !== null) { console.log('FEHLER: unerreichbarer Bezug gewählt'); process.exit(1); }
+  w();
+});
+console.log('== 8e Übernehmen (seit 0.39): Rück und Hin auf Strecke 1, Standort Kurhaus');
+dann(function (w) { standort = KURHAUS; w(); });
+schnellDurchlauf(13, 0, true);
+schnellDurchlauf(12, 0, true);
 function fertig() {
   console.log('Lade-Meldungen: ' + uhr.lade.length + ' (z. B. ' + uhr.lade.slice(0, 6).join(', ') + ')');
   console.log('Größte Nachricht: ' + uhr.groesste + ' Bytes (Puffer Uhr 2048)');

@@ -41,17 +41,18 @@
 
 enum { ST_LEER = -2, ST_LADE = -1, ST_SOLL = 0, ST_LIVE = 1, ST_NETZ = 2, ST_FEHLER = 3 };
 enum { M_ANZEIGE, M_LISTE, M_LADE };                       // was die Uhr gerade zeigt
-enum { L_HANDY, L_MENUE, L_AENDERN, L_EINST, L_ANSICHT, L_UMKREIS, L_QUELLE };  // woher die Liste stammt
+enum { L_HANDY, L_MENUE, L_AENDERN, L_EINST, L_ANSICHT, L_UMKREIS, L_QUELLE, L_SCHNELL };  // woher die Liste stammt
 enum { QUELLE_AUTO = 0, QUELLE_RMV = 1, QUELLE_TRANS = 2 };                     // wie QUELLEN in index.js
 enum { ABF_PLAN = 0, ABF_AKTUELL = 1 };                                          // Abfahrtszeit: Fahrplan oder mit Verspätung
 enum { E_ANSICHT, E_ABFAHRT, E_DAUER, E_QUELLE, E_UMKREIS };                     // Reihenfolge im Menü Einstellungen
 enum { LAYOUT_LED = 0, LAYOUT_KLAR = 1, LAYOUT_PHOSPHOR = 2 };
 enum { A_UNTERMENUE = 0, A_NEU = 1, A_AENDERN_RUECK = 2, A_AENDERN_START = 3, A_LOESCHEN = 4,
        A_WAHL = 5, A_ZURUECK = 6, A_LAYOUT = 7, A_UMKREIS = 8, A_QUELLE = 9, A_ABFAHRT = 10, A_DAUER = 11,
+       A_SCHNELL_HIN = 12, A_SCHNELL_RUECK = 13,
        A_EINST = -1, A_ANSICHT = -2, A_SET_LED = -3, A_SET_KLAR = -4,
        A_UMK = -5, A_SET_U500 = -6, A_SET_U1000 = -7, A_SET_U2000 = -8, A_SET_PHOSPHOR = -9,
        A_QLL = -10, A_SET_QAUTO = -11, A_SET_QRMV = -12, A_SET_QTRANS = -13,
-       A_ABF_UM = -14, A_DAUER_UM = -15 };   // negative: nur auf der Uhr                        // AKTION an das Handy, wie in index.js
+       A_ABF_UM = -14, A_DAUER_UM = -15, A_SCHNELL = -16 };   // negative: nur auf der Uhr                        // AKTION an das Handy, wie in index.js
 
 static Window *s_window;
 static Layer *s_layer;
@@ -944,6 +945,8 @@ static void menue_zeigen(void) {                       // Hauptmenü, kennt die 
   char buf[LTXT], nr[16] = "";
   if (s_anzahl > 1) snprintf(nr, sizeof(nr), " %d", s_seite + 1);
   liste_beginnen(L_MENUE, T("MENUE", "Menü"));
+  // Schnellere Abfahrt (seit 0.38) ganz oben: die häufigste Frage unterwegs, Select lang + Select + Select
+  if (s_anzahl > 0) eintrag(T("SCHNELLERE ABFAHRT", "Schnellere Abfahrt"), A_SCHNELL);
   if (s_anzahl < MAXS) eintrag(T("NEUE FAHRT", "Neue Fahrt"), A_NEU);
   if (s_anzahl > 0) {
     snprintf(buf, sizeof(buf), T("FAHRT%s AENDERN", "Fahrt%s ändern"), nr);  eintrag(buf, A_UNTERMENUE);
@@ -961,6 +964,21 @@ static void aendern_zeigen(void) {                     // Fahrt ändern: Rückfa
   liste_beginnen(L_AENDERN, buf);
   eintrag(T("RUECKFAHRT", "Rückfahrt"), A_AENDERN_RUECK);
   eintrag(T("START", "Start"), A_AENDERN_START);
+  layer_mark_dirty(s_layer);
+}
+
+// Schnellere Abfahrt: Hin (vorausgewählt) oder Rück, mit dem Start der jeweiligen Richtung. Ohne Rückweg nur Hin.
+static void schnell_zeigen(void) {
+  char buf[LTXT];
+  const Strecke *s = &s_str[s_seite];
+  liste_beginnen(L_SCHNELL, T("RICHTUNG", "Richtung"));
+  snprintf(buf, sizeof(buf), T("HIN AB %s", "Hin ab %s"), s_layout == LAYOUT_KLAR ? s->klar[0] : s->name[0]);
+  eintrag(buf, A_SCHNELL_HIN);
+  if (strcmp(s->name[1], "KEIN RUECKWEG")) {
+    snprintf(buf, sizeof(buf), T("RUECK AB %s", "Rück ab %s"), s_layout == LAYOUT_KLAR ? s->klar[1] : s->name[1]);
+    eintrag(buf, A_SCHNELL_RUECK);
+  }
+  lauf_starten();
   layer_mark_dirty(s_layer);
 }
 
@@ -1109,7 +1127,8 @@ static bool menue_empfangen(DictionaryIterator *it) {
   bool menue = false;
   if ((t = dict_find(it, MESSAGE_KEY_L_ANZAHL))) {
     menue = true;
-    if (t->value->int32 < 0) menue_zeigen();             // Ablauf am Handy beendet: zurück ins Uhr-Menü
+    if (t->value->int32 == -2) anzeige_zeigen();         // Ablauf beendet, gleich zur Anzeige (Schnellere Abfahrt)
+    else if (t->value->int32 < 0) menue_zeigen();        // Ablauf am Handy beendet: zurück ins Uhr-Menü
     else {
       Tuple *ti = dict_find(it, MESSAGE_KEY_L_TITEL);
       liste_beginnen(L_HANDY, ti ? ti->value->cstring : "");
@@ -1156,6 +1175,7 @@ static void liste_waehlen(void) {
   }
   const int a = s_lakt[s_lsel];
   if (a == A_UNTERMENUE) aendern_zeigen();
+  else if (a == A_SCHNELL) schnell_zeigen();
   else if (a == A_EINST) einstellungen_zeigen(E_ANSICHT);
   else if (a == A_ABF_UM) abfahrt_umschalten();
   else if (a == A_DAUER_UM) dauer_umschalten();
@@ -1178,7 +1198,7 @@ static void zurueck(void) {
   switch (s_modus) {
     case M_ANZEIGE: window_stack_pop(true); break;     // App beenden
     case M_LISTE:
-      if (s_lart == L_AENDERN || s_lart == L_EINST) menue_zeigen();
+      if (s_lart == L_AENDERN || s_lart == L_EINST || s_lart == L_SCHNELL) menue_zeigen();
       else if (s_lart == L_ANSICHT) einstellungen_zeigen(E_ANSICHT);
       else if (s_lart == L_UMKREIS) einstellungen_zeigen(E_UMKREIS);
       else if (s_lart == L_QUELLE) einstellungen_zeigen(E_QUELLE);

@@ -16,7 +16,7 @@ transfers. Every route is a pair of stops served by at least one line directly.
 Made together by **Seb & Claude** (Anthropic): ideas, design decisions and real-world testing by Seb,
 code, tests and documentation by Claude in pair-programming sessions.
 
-> **Status: beta, version 0.36.** Not yet tested in daily use — only in the emery emulator and with Node tests
+> **Status: beta, version 0.41.** Not yet tested in daily use — only in the emery emulator and with Node tests
 > against live data. Version numbers start with 0 until the app has proven itself on the street. Releases
 > published earlier as 3.2.0 to 3.4.0 are the same line of development (now 0.32 to 0.34).
 
@@ -59,6 +59,13 @@ departure are the number to go by**.*
   Klar and Phosphor views. The minutes until departure always include the delay
 - **Minutes with a tick everywhere:** `13'` until departure, `+1'` delay, `7'` travel time
 - **Three views**, switchable on the phone or on the watch: LED (default), Klar and Phosphor
+- **Faster departure** (0.38–0.41): for the route on screen, the app looks for buses from any stop within the
+  radius around your start that get you to the destination **earlier** — including a different line you did not
+  have in mind. Walking is part of the comparison: to the new stop, from the alternative stop to your actual
+  destination, and to your usual stop for the bus you compare against (about 4 km/h). Pick one to see it, or
+  adopt it as the new route for that direction
+- **Start anywhere nearby** (0.37): when setting up a route, *IM UMKREIS 1KM* treats all stops within the radius
+  as possible starts — handy where you don't know your way around
 - **Set up routes right on the watch** — long-press Select opens a menu:
   new route from the stops near you, change the return stop or the start, delete. The phone does the
   searching, the watch only shows lists
@@ -90,7 +97,8 @@ departure are the number to go by**.*
 
 ### New route on the watch
 
-1. **Start** — the 10 nearest stops to your phone's location
+1. **Start** — the 10 nearest stops to your phone's location. At the top: *IM UMKREIS 1KM* — all stops within
+   the radius count as start; after the destination you pick where to board (nearest first)
 2. **Line** — all lines from that stop, or *all lines*
 3. **Direction** — only if you picked one line: one entry per terminus, e.g. `SONNENBERG BAHNHOLZ`. If the
    line runs to the same terminus on different routes, one entry per route, named after the first stop only
@@ -105,6 +113,36 @@ departure are the number to go by**.*
    around the start, then **where to get off** — the start first, otherwise sorted by distance to the start.
    You always confirm this step. Nothing found: a larger radius is offered
 8. Saved, short names are generated automatically. The watch always queries exactly the saved pair of stops
+
+### Faster departure
+
+Long-press Select → *SCHNELLERE ABFAHRT* (top of the menu).
+
+1. **Direction** — *HIN* (outbound, preselected) or *RUECK* (return)
+2. **Board at** — stops within the radius around the start with a faster trip, nearest to you first
+3. **Get off at** — stops within the radius around the destination; the destination itself first
+4. **Trips** — line, departure, arrival; the title shows when your usual bus arrives (`BISHER AN 10:51`)
+5. Select a trip → mini menu: *ZURUECK* (preselected) back to the display without changes,
+   *UEBERNEHMEN* one line below adopts it: start, stop and line of **that direction** are replaced, the other
+   direction stays as it was
+
+What counts as faster: the alternative's arrival plus the walk from its stop to your destination must be before
+the arrival of your usual bus. That bus is the first one **you can still reach on foot**. Walking time is the
+straight-line distance at 50 m per minute (about 4 km/h on real streets), no extra buffer. If the phone's
+location is unknown or far away (planning ahead), the app assumes you stand at the start. Alternatives come from
+Transitous (timetable only); your usual bus from the chosen source, with real-time data from RMV.
+
+<p>
+  <img src="docs/images/faster-direction.png" width="200" alt="Direction">
+  <img src="docs/images/faster-alighting.png" width="200" alt="Get off at">
+  <img src="docs/images/faster-trips.png" width="200" alt="Trips">
+  <img src="docs/images/faster-adopt.png" width="200" alt="Mini menu">
+  <img src="docs/images/faster-adopted.png" width="200" alt="Adopted">
+</p>
+
+*Example route Hbf ↔ Kurhaus/Theater in the emulator: return from Kurhaus — line 1 at 10:39 arrives before the
+usual 8 (10:51); mini menu with ZURUECK preselected; after adopting on the outbound trip the display shows only
+line 4 from Hbf, the return trip is unchanged.*
 
 ### Radius around the start
 
