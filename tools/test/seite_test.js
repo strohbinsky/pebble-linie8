@@ -1,4 +1,4 @@
-// Testet die Einstellungsseite in Node mit echten Transitous-Daten: neue Strecke über "In meiner Nähe".
+// Testet die Einstellungsseite in Node mit echten Transitous-Daten: neue Seite mit Ziel über "In meiner Nähe", dann eine ohne Ziel.
 // Aufruf: node tools/test/seite_test.js
 var fs = require('fs'), path = require('path'), vm = require('vm');
 var X = require('./xhr');
@@ -47,33 +47,36 @@ warte(function () { return ctx.e && ctx.e.suche && ctx.e.suche.length; }, functi
     if (ctx.e.wahlRichtung !== null) { console.log('FEHLER: Richtung bleibt nach Linienwechsel'); process.exit(1); }
     var z = Object.keys(ctx.e.erg.ziele).filter(function (n) { return /Luisenplatz$/.test(n); })[0];
     klicke({ 'data-a': 'ziel', 'data-n': z });
-    warte(function () { return ctx.e.pruef && ctx.e.pruef.fertig && ctx.e.rk && !ctx.e.rk.lade; }, function () {
-      console.log('Hin:', ctx.e.pruef.hin.join(' '), '| Rückfahrt-Kandidaten:', ctx.e.rk.liste.map(function (k) { return k.name + ' ' + k.m + 'm [' + k.linien.join(',') + ']'; }).join(' | '));
-      console.log('Rückfahrt ab:', ctx.e.c && ctx.e.c.name, '| Auswahl:', ctx.e.auswahl.join(' '));
-      function gesperrt() { return /data-a="uebernehmen" disabled/.test(app.innerHTML); }
-      if (gesperrt()) { console.log('FEHLER: Übernehmen gesperrt im Genau-Modus'); process.exit(1); }
-      // Umkreis (seit 0.33): nur auf Knopfdruck, Ausstieg muss bewusst gewählt werden
-      klicke({ 'data-a': 'umkreis' });
-      warte(function () { return ctx.e.rkU && !ctx.e.rkU.lade; }, function () {
-        var l = ctx.e.rkU.liste;
-        console.log('Umkreis ' + ctx.e.rkU.r + ' m: ' + l.length + ' Einstiege, z. B. ' + l.slice(0, 4).map(function (k) { return k.name + ' ' + k.m + 'm [' + k.linien + '] ' + k.ziele.length + ' Ausstiege'; }).join(' | '));
-        if (!l.length) { console.log('FEHLER: Umkreis leer'); process.exit(1); }
-        klicke({ 'data-a': 'rueckU', 'data-i': '0' });
-        if (!gesperrt()) { console.log('FEHLER: Übernehmen ohne gewählten Ausstieg möglich'); process.exit(1); }
-        var zi = l[0].ziele.findIndex(function (z) { return !z.start; });
-        console.log('Ausstiege ab ' + l[0].name + ': ' + l[0].ziele.slice(0, 5).map(function (z) { return z.name + (z.start ? ' (Start)' : ' ' + z.m + 'm'); }).join(' | '));
-        klicke({ 'data-a': 'aus', 'data-i': String(zi) });
-        if (gesperrt()) { console.log('FEHLER: Übernehmen trotz Ausstieg gesperrt'); process.exit(1); }
-        klicke({ 'data-a': 'umkreisWert', value: '2000' });
-        klicke({ 'data-a': 'quelleWert', value: 'trans' });
-        klicke({ 'data-a': 'abfahrtWert', value: 'aktuell' });
-        klicke({ 'data-a': 'dauerWert', checked: false });
-        klicke({ 'data-a': 'uebernehmen' });
-        console.log('Liste:', text().substring(0, 200));
-        klicke({ 'data-a': 'speichern' });
-        console.log('Ergebnis:', JSON.stringify(ergebnis));
-        if (!ergebnis.strecken[0].d || ergebnis.umkreis !== 2000 || ergebnis.quelle !== 'trans' || ergebnis.abfahrt !== 'aktuell' || ergebnis.dauer !== 'aus') { console.log('FEHLER: d oder Umkreis fehlt'); process.exit(1); }
-        console.log('Abfragen:', X.zaehler.n, '| Dauer:', Math.round((Date.now() - t0) / 1000) + ' s');
+    function gesperrt() { return /data-a="uebernehmen" disabled/.test(app.innerHTML); }
+    warte(function () { return ctx.e.pruef && ctx.e.pruef.fertig; }, function () {
+      console.log('Hin:', ctx.e.pruef.hin.join(' '), '| Auswahl:', ctx.e.auswahl.join(' '));
+      if (gesperrt()) { console.log('FEHLER: Übernehmen mit Ziel gesperrt'); process.exit(1); }
+      if (/Rückfahrt ab|4 · Rückfahrt/.test(text())) { console.log('FEHLER: Rückfahrt-Abschnitt noch da (seit 0.50 nur an der Uhr)'); process.exit(1); }
+      klicke({ 'data-a': 'umkreisWert', value: '2000' });
+      klicke({ 'data-a': 'quelleWert', value: 'trans' });
+      klicke({ 'data-a': 'abfahrtWert', value: 'aktuell' });
+      klicke({ 'data-a': 'dauerWert', checked: false });
+      klicke({ 'data-a': 'uebernehmen' });
+      // Seite ohne Ziel (seit 0.50): Hbf, Linie 8, in der Richtungsliste "Ohne Ziel"
+      klicke({ 'data-a': 'neu' });
+      klicke({ 'data-a': 'nah' });
+      warte(function () { return ctx.e && ctx.e.suche && ctx.e.suche.length; }, function () {
+        klicke({ 'data-a': 'start', 'data-i': String(ctx.e.suche.findIndex(function (t) { return /Hauptbahnhof/.test(t.name); })) });
+        warte(function () { return ctx.e.erg; }, function () {
+          klicke({ 'data-a': 'linie', 'data-l': '8' });
+          if (!/Ohne Ziel/.test(text())) { console.log('FEHLER: "Ohne Ziel" fehlt in der Richtungsliste'); process.exit(1); }
+          klicke({ 'data-a': 'ohneZiel' });
+          console.log('Ohne Ziel, Auswahl:', ctx.e.auswahl.join(' '));
+          if (gesperrt() || ctx.e.auswahl.join() !== '8') { console.log('FEHLER: Ohne Ziel nicht übernehmbar oder Linie falsch'); process.exit(1); }
+          klicke({ 'data-a': 'uebernehmen' });
+          console.log('Liste:', text().substring(0, 260));
+          klicke({ 'data-a': 'speichern' });
+          console.log('Ergebnis:', JSON.stringify(ergebnis));
+          var s0 = ergebnis.strecken[0], s1 = ergebnis.strecken[1];
+          if (!s0.b || s1.b !== null || s1.alle || s1.linien.join() !== '8' || ergebnis.umkreis !== 2000 || ergebnis.quelle !== 'trans' ||
+              ergebnis.abfahrt !== 'aktuell' || ergebnis.dauer !== 'aus' || s0.c || s0.d) { console.log('FEHLER: Ergebnis falsch'); process.exit(1); }
+          console.log('Abfragen:', X.zaehler.n, '| Dauer:', Math.round((Date.now() - t0) / 1000) + ' s');
+        });
       });
     });
   });

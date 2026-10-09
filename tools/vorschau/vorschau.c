@@ -1,7 +1,7 @@
 // Rendert das Display von main.c in eine Rohdatei (200x228 RGB) und prüft die Zeitumrechnung.
-// Ansicht: LAYOUT=0 (LED), 1 (Klar, ohne Text), 2 (Phosphor). Fahrtdauer: DAUER="14,12,0,13,0,0", DAUERAUS=1 blendet sie aus.
-// Abfahrtszeit: ABFAHRT=1 = aktuell (mit Verspätung), sonst Fahrplan.
-// Uhr-Menü: MODUS=menue|aendern|einst|liste|lade (einst: SEL0 = vorausgewählter Eintrag), dazu TITEL, EINTRAEGE="A|B|C", SEL (Index), LAUF (Lauftext-Versatz), LADETEXT
+// Ansicht: LAYOUT=0 (LED), 1 (Klar, ohne Text), 2 (Phosphor). Fahrtdauer: DAUER="14,12,0", DAUERAUS=1 blendet sie aus.
+// Abfahrtszeit: ABFAHRT=1 = aktuell (mit Verspätung), sonst Fahrplan. Seit 0.50 eine Richtung je Seite.
+// Uhr-Menü: MODUS=menue|einst|liste|lade (einst: SEL0 = vorausgewählter Eintrag), dazu TITEL, EINTRAEGE="A|B|C", SEL (Index), LAUF (Lauftext-Versatz), LADETEXT
 #define main pebble_main
 #include "../../src/c/main.c"
 #undef main
@@ -13,7 +13,8 @@ int main(int argc, char **argv) {
                                          {1767225600, 3600}, {1782864000, 7200} };
   for (unsigned i = 0; i < sizeof p / sizeof *p; i++)
     printf("t=%ld offset=%d erwartet=%d %s\n", (long)p[i].t, berlin_offset(p[i].t), p[i].off, berlin_offset(p[i].t) == p[i].off ? "ok" : "FEHLER");
-  // Aufruf: vorschau <jetzt> <status> <anzahl> <seite> <hin1..3> <rück1..3> <datei> [linien hin1..3 rück1..3] [nameA nameB]
+  // Aufruf: vorschau <jetzt> <status> <anzahl> <seite> <ab1..3> <frei frei frei> <datei> [linien 1..3] [frei frei frei] [nameA nameB]
+  // nameB "" = Seite ohne Ziel (0.50), HIER=10 = Abfahrten hier (0.51); Endziele dann per ENDZIEL="EIGENHEIM|NERO TAL|" (Klar-Schreibweise gleich).
   FAKE_NOW = atol(argv[1]);
   s_anzahl = atoi(argv[3]);
   s_seite = atoi(argv[4]);
@@ -22,39 +23,50 @@ int main(int argc, char **argv) {
   s_status_start = atoi(argv[2]);
   s->stand = FAKE_NOW - 30;
   for (int i = 0; i < MAXD; i++) {
-    s->dep[0][i] = atol(argv[5 + i]); s->dep[1][i] = atol(argv[8 + i]);
-    strcpy(s->lin[0][i], argc > 12 + i ? argv[12 + i] : "8");
-    strcpy(s->lin[1][i], argc > 15 + i ? argv[15 + i] : "8");
+    s->dep[i] = atol(argv[5 + i]);
+    strcpy(s->lin[i], argc > 12 + i ? argv[12 + i] : "8");
   }
   strcpy(s->quelle, getenv("QUELLE") ? getenv("QUELLE") : "RMV");
-  if (getenv("STEIG")) {                       // STEIG="B,B,A,C,,": Steig hin1..3, rück1..3 (leer = keiner)
+  if (getenv("STEIG")) {                       // STEIG="B,B,A": Steig je Abfahrt (leer = keiner)
     const char *p = getenv("STEIG");
-    for (int i = 0; i < 6 && p; i++) {
+    for (int i = 0; i < MAXD && p; i++) {
       const char *k = strchr(p, ',');
       const int n = k ? (int)(k - p) : (int)strlen(p);
-      snprintf(s->steig[i / 3][i % 3], STEIGLEN, "%.*s", n, p);
+      snprintf(s->steig[i], STEIGLEN, "%.*s", n, p);
       p = k ? k + 1 : NULL;
     }
   }
-  if (getenv("VERSP")) {                       // VERSP="2,0,0,12,9999,0": Verspätung hin1..3, rück1..3
-    char tmp[64]; strncpy(tmp, getenv("VERSP"), 63); tmp[63] = 0;
-    char *tok = strtok(tmp, ","); 
-    for (int i = 0; i < 6 && tok; i++, tok = strtok(NULL, ",")) s->del[i / 3][i % 3] = atoi(tok);
+  if (getenv("ENDZIEL")) {                     // ENDZIEL="EIGENHEIM|NEROTAL|": Endziel je Abfahrt
+    const char *p = getenv("ENDZIEL");
+    for (int i = 0; i < MAXD && p; i++) {
+      const char *k = strchr(p, '|');
+      const int n = k ? (int)(k - p) : (int)strlen(p);
+      snprintf(s->end[i], NAMELEN, "%.*s", n, p);
+      snprintf(s->endk[i], NAMELEN, "%.*s", n, p);
+      p = k ? k + 1 : NULL;
+    }
   }
-  if (getenv("DAUER")) {                       // DAUER="14,12,0,13,0,0": Fahrtdauer hin1..3, rück1..3
+  if (getenv("VERSP")) {                       // VERSP="2,0,9999": Verspätung je Abfahrt
+    char tmp[64]; strncpy(tmp, getenv("VERSP"), 63); tmp[63] = 0;
+    char *tok = strtok(tmp, ",");
+    for (int i = 0; i < MAXD && tok; i++, tok = strtok(NULL, ",")) s->del[i] = atoi(tok);
+  }
+  if (getenv("DAUER")) {                       // DAUER="14,12,0": Fahrtdauer je Abfahrt
     char tmp[64]; strncpy(tmp, getenv("DAUER"), 63); tmp[63] = 0;
     char *tok = strtok(tmp, ",");
-    for (int i = 0; i < 6 && tok; i++, tok = strtok(NULL, ",")) s->dur[i / 3][i % 3] = atoi(tok);
+    for (int i = 0; i < MAXD && tok; i++, tok = strtok(NULL, ",")) s->dur[i] = atoi(tok);
   }
   strcpy(s->name[0], argc > 18 ? argv[18] : "HAUPTBAHNHOF");
   strcpy(s->name[1], argc > 19 ? argv[19] : "LUISENPLATZ");
+  if (getenv("HIER")) {                        // HIER=10: „Abfahrten hier“, erste von 10 Haltestellen (0.51)
+    s_str[HIER] = *s; s_hier = true; s_hier_nr = 0; s_hier_n = atoi(getenv("HIER"));
+  }
   if (getenv("LAYOUT")) s_layout = atoi(getenv("LAYOUT"));
   if (getenv("ABFAHRT")) s_abfahrt = atoi(getenv("ABFAHRT"));   // 1 = aktuell (Zeit mit Verspätung)
   if (getenv("DAUERAUS")) s_dauer = false;                       // Fahrtdauer ausgeblendet
   const char *mod = getenv("MODUS");
   if (mod) {
     if (!strcmp(mod, "menue")) menue_zeigen();
-    else if (!strcmp(mod, "aendern")) aendern_zeigen();
     else if (!strcmp(mod, "einst")) einstellungen_zeigen(getenv("SEL0") ? atoi(getenv("SEL0")) : 0);
     else {
       liste_beginnen(L_HANDY, getenv("TITEL") ? getenv("TITEL") : "");

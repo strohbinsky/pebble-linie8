@@ -1,10 +1,14 @@
 // Linie 8 — Handy-Teil (PebbleKit JS).
-// Hält bis zu 8 Strecken (Haltestellenpaare), lädt beim Öffnen und Blättern die nächsten Fahrten
-// und schickt Abfahrtszeiten (Unix-Sekunden, UTC) und Linien an die Uhr.
+// Hält bis zu 8 Seiten, lädt beim Öffnen und Blättern die nächsten Fahrten und schickt Abfahrtszeiten
+// (Unix-Sekunden, UTC) und Linien an die Uhr.
+//
+// Seit 0.50 ist eine Seite eine Richtung: Haltestelle a, optional Ziel b, Linienfilter. Mit Ziel: Verbindungssuche
+// a -> b ohne Umstieg (liefert genau die Fahrten, die an BEIDEN Haltestellen halten — geteilte Linien erledigt),
+// mit Fahrtdauer. Ohne Ziel: alle Abfahrten an a mit Endziel. Die Rückfahrt ist eine eigene Seite, angelegt über
+// das Uhr-Menü direkt hinter der Seite, von der sie ausgeht. Bis 0.42 war eine Seite ein Paar Hin + Rück.
 //
 // Datenquelle: RMV (HAFAS ReST), wenn in den Einstellungen ein Schlüssel hinterlegt ist, sonst oder bei
-// Fehler Transitous (MOTIS, nur Sollfahrplan). In beiden Fällen Verbindungssuche Start -> Ziel ohne Umstieg:
-// liefert genau die Fahrten, die an BEIDEN Haltestellen halten — damit sind geteilte Linien erledigt.
+// Fehler Transitous (MOTIS, nur Sollfahrplan).
 //
 // Uhr-Menü (Version 0.30): Strecken direkt an der Uhr anlegen, ändern, löschen. Der Ablauf ist ein
 // Zustandsautomat hier im Handy-Skript (siehe "Uhr-Menü" unten); die Uhr zeigt nur Listen und meldet die Wahl.
@@ -15,7 +19,7 @@ var SCHRIFT = require('./schrift.json');
 var Logik = require('./logik');
 
 var PLAN = 'https://api.transitous.org/api/v5/plan';
-var MAXD = 3;          // muss zu HIN[3] / RUECK[3] in package.json passen
+var MAXD = 3;          // muss zu AB[3] in package.json passen
 var MAXS = 8;          // muss zu NAME_A[8] / NAME_B[8] passen
 var TIMEOUT_MS = 15000;
 
@@ -23,9 +27,12 @@ var STATUS_SOLL = 0, STATUS_LIVE = 1, STATUS_NETZ = 2, STATUS_FEHLER = 3;
 var AUSFALL = 9999;   // Verspätungswert für eine ausgefallene Fahrt
 
 // ---------- Speicher ----------
+// Seiten (seit 0.50) unter 'seiten': [{ a, b (null = ohne Ziel), linien, alle, zuletzt }]. Die Paare bis 0.42
+// unter 'strecken' werden nicht übernommen (Entscheidung Seb 2026-10-09: neu anlegen geht schnell).
 function strecken() {
-  try { return JSON.parse(localStorage.getItem('strecken')) || []; } catch (e) { return []; }
+  try { return JSON.parse(localStorage.getItem('seiten')) || []; } catch (e) { return []; }
 }
+function streckenSchreiben(liste) { localStorage.setItem('seiten', JSON.stringify(liste)); }
 function aktiveSeite() {
   var n = strecken().length, s = parseInt(localStorage.getItem('seite') || '0', 10);
   return n === 0 ? 0 : Math.max(0, Math.min(n - 1, isNaN(s) ? 0 : s));
@@ -69,7 +76,7 @@ function holen(von, nach, linien, fertig, max) {   // max: so viele Fahrten (Sta
   var xhr = new XMLHttpRequest();
   xhr.open('GET', url, true);
   // Transitous lehnt Anfragen ohne User-Agent mit 403 ab.
-  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/0.42 (privat)'); } catch (e) {}
+  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/0.51 (privat)'); } catch (e) {}
   xhr.onload = function () {
     if (xhr.status !== 200) { console.log('HTTP ' + xhr.status); return ende(STATUS_FEHLER); }
     try {
@@ -203,18 +210,67 @@ function holenRmv(von, nach, linien, fertig, max) {
   });
 }
 
-// ---------- An die Uhr ----------
-// Rückfahrt startet an c (eigene Haltestelle nahe dem Ziel); ältere Einrichtungen ohne c: am Ziel b.
-function rueckStart(st) { return st.ohneRueck ? null : (st.c || st.b); }
-// Rückfahrt endet an d (bewusst gewählter Ausstieg im Umkreis um A, seit 0.33); ohne d genau am Start a.
-function rueckZiel(st) { return st.d || st.a; }
-// Linienfilter je Richtung: linienHin / linienRueck (seit 0.39, aus „Schnellere Abfahrt > Übernehmen“) vor dem
-// gemeinsamen Filter linien; alle = kein Filter. Die Einstellungsseite kennt nur linien und lässt die beiden beim Ändern weg.
-function linienFuer(st, rueck) {
-  var o = rueck ? st.linienRueck : st.linienHin;
-  if (o && o.length) return o;
-  return st.alle ? null : st.linien;
+// ---------- Seite ohne Ziel: alle Abfahrten der Haltestelle (seit 0.50) ----------
+// Je Fahrt zusätzlich das Endziel (z). "über …" liefert keine der beiden Quellen (geprüft 2026-10-09), daher nur das Endziel.
+var TAFEL_N = 60;      // so viele Abfahrten ansehen, bevor der Linienfilter greift (Hbf: 25 Linien)
+function tafelTransitous(von, linien, fertig) {
+  transitousHolen('v5/stoptimes?stopId=' + encodeURIComponent(von.id) + '&n=' + TAFEL_N, function (f, d) {
+    if (f) return fertig(f === 'kein Netz' ? STATUS_NETZ : STATUS_FEHLER);
+    try {
+      var liste = [], live = false;
+      (d.stopTimes || []).forEach(function (x) {
+        if (!L.oepnv(x)) return;                                   // keine Mitfahrbörse
+        if (linien && linien.length && linien.indexOf(x.routeShortName) < 0) return;
+        var p = x.place || {};
+        if (p.pickupType === 'NOT_ALLOWED') return;                  // endet hier
+        var plan = Math.floor(Date.parse(p.scheduledDeparture || p.departure) / 1000);
+        var t = Math.floor(Date.parse(p.departure || p.scheduledDeparture) / 1000);
+        if (!t) return;
+        var dl = (x.cancelled || x.tripCancelled || p.cancelled) ? AUSFALL : (x.realTime ? Math.round((t - plan) / 60) : 0);
+        liste.push({ t: t, l: linienKurz(x.routeShortName), d: dl, s: steigText(p.track || p.scheduledTrack), f: 0,
+                     z: x.headsign || (x.tripTo && x.tripTo.name) || '' });
+        live = live || !!x.realTime;
+      });
+      liste.sort(function (a, b) { return a.t - b.t; });
+      fertig(null, { fahrten: liste.slice(0, MAXD), live: live });
+    } catch (e) {
+      console.log('Abfahrten unlesbar: ' + e);
+      fertig(STATUS_FEHLER);
+    }
+  });
 }
+
+function tafelRmv(von, linien, fertig) {
+  rmvKennung(von, function (f1, a) {
+    if (f1 !== null) return fertig(f1);
+    var filter = (linien && linien.length) ? '&lines=' + encodeURIComponent(linien.join(',')) : '';
+    rmvGet('departureBoard?maxJourneys=30&duration=120' + filter + '&id=' + encodeURIComponent(a), function (f, d) {
+      if (f !== null) return fertig(f);
+      try {
+        var liste = [], live = false;
+        (d.Departure || []).forEach(function (x) {
+          var pr = x.ProductAtStop || x.Product;
+          if (pr && pr.length !== undefined) pr = pr[0];
+          var name = (pr && (pr.line || pr.displayNumber || pr.num)) || x.name || '';
+          if (linien && linien.length && linien.indexOf(name) < 0) return;
+          var rt = !!x.rtTime, plan = deZuUtc(x.date, x.time), t = rt ? deZuUtc(x.rtDate || x.date, x.rtTime) : plan;
+          var steig = x.rtTrack || x.track || (x.rtPlatform && x.rtPlatform.text) || (x.platform && x.platform.text);
+          liste.push({ t: t, l: linienKurz(name), d: x.cancelled ? AUSFALL : Math.round((t - plan) / 60), s: steigText(steig), f: 0,
+                       z: x.direction || '' });
+          live = live || rt;
+        });
+        liste.sort(function (x, y) { return x.t - y.t; });
+        fertig(null, { fahrten: liste.slice(0, MAXD), live: live });
+      } catch (e) {
+        console.log('RMV-Abfahrten unlesbar: ' + e);
+        fertig(STATUS_FEHLER);
+      }
+    });
+  });
+}
+
+// ---------- An die Uhr ----------
+function linienFuer(st) { return st.alle ? null : st.linien; }   // alle = kein Filter
 
 // Umkreis um den Start für die Rückfahrt-Suche: 500 / 1000 / 2000 m, Standard 1000. Uhr-Menü und Seite.
 function umkreis() {
@@ -249,71 +305,67 @@ function einrichtungSenden() {
   msg[keys.ABFAHRT] = abfahrt() === 'aktuell' ? 1 : 0;
   msg[keys.DAUER] = dauer() === 'an' ? 1 : 0;
   for (var i = 0; i < liste.length && i < MAXS; i++) {
-    var c = rueckStart(liste[i]), stadt = L.stadtVon(liste[i].a.name);
+    var b = liste[i].b, stadt = L.stadtVon(liste[i].a.name);
     msg[keys.NAME_A + i] = liste[i].a.kurz;
-    msg[keys.NAME_B + i] = c ? c.kurz : 'KEIN RUECKWEG';
+    msg[keys.NAME_B + i] = b ? b.kurz : '';           // leer = Seite ohne Ziel
     // Namen für die Ansicht „Klar“ immer mitschicken, damit die Uhr ohne Handy umschalten kann
     msg[keys.KLAR_A + i] = L.utf8Kuerzen(L.klarname(liste[i].a.name, stadt), 31);
-    msg[keys.KLAR_B + i] = c ? L.utf8Kuerzen(L.klarname(c.name, stadt), 31) : 'Kein Rückweg';
+    msg[keys.KLAR_B + i] = b ? L.utf8Kuerzen(L.klarname(b.name, stadt), 31) : '';
   }
   senden(msg);
 }
 
-// Lädt beide Richtungen einer Strecke aus einer Quelle. fertig(msg) bei Erfolg, fertig(null, fehler) sonst.
-function richtungenLaden(st, quelle, fertig) {
-  var msg = {}, offen = 2, fehler = null, live = true;
-  function eintragen(t, l, v, st, fd, erg) {
+// Lädt die Abfahrten einer Seite aus einer Quelle. fertig(msg) bei Erfolg, fertig(null, fehler) sonst.
+// Mit Ziel: Verbindungssuche mit Fahrtdauer. Ohne Ziel: Abfahrten der Haltestelle mit Endziel (AB_Z, AB_ZK).
+function seiteHolen(st, quelle, fertig) {
+  var linien = linienFuer(st), stadt = L.stadtVon(st.a.name);
+  function cb(f, erg) {
+    if (f !== null && f !== undefined) return fertig(null, f);
+    var msg = {};
     for (var j = 0; j < MAXD; j++) {
-      var f = erg.fahrten[j];
-      msg[t + j] = f ? f.t : 0;
-      msg[l + j] = f ? f.l : '';
-      msg[v + j] = f ? f.d : 0;
-      msg[st + j] = f ? (f.s || '') : '';
-      msg[fd + j] = f ? (f.f || 0) : 0;
+      var x = erg.fahrten[j];
+      msg[keys.AB + j] = x ? x.t : 0;
+      msg[keys.AB_L + j] = x ? x.l : '';
+      msg[keys.AB_D + j] = x ? x.d : 0;
+      msg[keys.AB_S + j] = x ? (x.s || '') : '';
+      msg[keys.AB_F + j] = x ? (x.f || 0) : 0;
+      msg[keys.AB_Z + j] = x && x.z ? L.utf8Kuerzen(L.kurzname(x.z, stadt), 31) : '';
+      msg[keys.AB_ZK + j] = x && x.z ? L.utf8Kuerzen(L.klarname(x.z, stadt), 31) : '';
     }
-    live = live && erg.live;
-  }
-  function eins() {
-    if (--offen > 0) return;
-    if (fehler !== null) return fertig(null, fehler);
-    msg[keys.STATUS] = live ? STATUS_LIVE : STATUS_SOLL;
+    msg[keys.STATUS] = erg.live ? STATUS_LIVE : STATUS_SOLL;
     fertig(msg);
   }
   // Transitous kennt Haltestellen per Kennung, RMV per Haltestellen-Objekt (Name, Koordinaten)
-  function abfrage(von, nach, rueck, cb) {
-    var linien = linienFuer(st, rueck);
-    if (quelle === 'RMV') holenRmv(von, nach, linien, cb); else holen(von.id, nach.id, linien, cb);
+  if (st.b) {
+    if (quelle === 'RMV') holenRmv(st.a, st.b, linien, cb); else holen(st.a.id, st.b.id, linien, cb);
+  } else {
+    if (quelle === 'RMV') tafelRmv(st.a, linien, cb); else tafelTransitous(st.a, linien, cb);
   }
-  abfrage(st.a, st.b, false, function (f, erg) {
-    if (f !== null) fehler = f; else eintragen(keys.HIN, keys.HIN_L, keys.HIN_D, keys.HIN_S, keys.HIN_F, erg);
-    eins();
-  });
-  var c = rueckStart(st);
-  if (!c) { eintragen(keys.RUECK, keys.RUECK_L, keys.RUECK_D, keys.RUECK_S, keys.RUECK_F, { fahrten: [], live: true }); eins(); return; }
-  abfrage(c, rueckZiel(st), true, function (f, erg) {
-    if (f !== null) fehler = f; else eintragen(keys.RUECK, keys.RUECK_L, keys.RUECK_D, keys.RUECK_S, keys.RUECK_F, erg);
-    eins();
-  });
 }
 
-// Auto: RMV, wenn ein Schlüssel hinterlegt ist; schlägt RMV fehl, die ganze Strecke aus Transitous.
+// Auto: RMV, wenn ein Schlüssel hinterlegt ist; schlägt RMV fehl, die ganze Seite aus Transitous.
 // Nur RMV / nur Transitous: kein Wechsel, ein Fehler wird als Fehler gezeigt.
-// Jeder Aufruf macht den vorigen ungültig (ladeNr): wird während einer Abfrage die Quelle oder Seite gewechselt,
+// Jeder Aufruf macht den vorigen desselben Kanals ungültig (ladeNrn): wird während einer Abfrage die Quelle oder Seite gewechselt,
 // darf die alte Antwort nicht mehr an die Uhr — sonst zeigt sie RMV, obwohl gerade Transitous gewählt wurde.
-var ladeNr = 0;
+// kanal: 'seite' (gespeicherte Seiten) oder 'hier' (Abfahrten hier) — je Kanal zählt nur die letzte Abfrage.
+// extra: weitere Felder für die Nachricht (Name der Haltestelle bei „Abfahrten hier“).
+var ladeNrn = {};
 function streckeLaden(i) {
   var st = strecken()[i];
-  if (!st) return;
-  var nr = ++ladeNr;
+  if (st) abfahrtenLaden(st, i, null, 'seite');
+}
+function abfahrtenLaden(st, i, extra, kanal) {
+  var nr = ladeNrn[kanal] = (ladeNrn[kanal] || 0) + 1;
   function senden2(msg, quelle) {
-    if (nr !== ladeNr) { console.log('Abfrage ' + nr + ' (' + quelle + ') veraltet, verworfen'); return; }
+    if (nr !== ladeNrn[kanal]) { console.log('Abfrage ' + kanal + ' ' + nr + ' (' + quelle + ') veraltet, verworfen'); return; }
+    Object.keys(extra || {}).forEach(function (k) { msg[k] = extra[k]; });
     msg[keys.SEITE] = i;
     msg[keys.QUELLE] = quelle;
     msg[keys.STAND] = Math.floor(Date.now() / 1000);
     senden(msg);
   }
   function transitous() {
-    richtungenLaden(st, 'TRANS', function (msg, fehler) {
+    seiteHolen(st, 'TRANS', function (msg, fehler) {
       if (msg) return senden2(msg, 'TRANS');
       var m = {}; m[keys.STATUS] = fehler;
       senden2(m, 'TRANS');
@@ -323,7 +375,7 @@ function streckeLaden(i) {
   var q = quelle();
   if (q === 'trans' || (q === 'auto' && !rmvSchluessel())) return transitous();
   if (!rmvSchluessel()) { console.log('Quelle nur RMV, aber kein Schlüssel'); return fehlerRmv(STATUS_FEHLER); }
-  richtungenLaden(st, 'RMV', function (msg, fehler) {
+  seiteHolen(st, 'RMV', function (msg, fehler) {
     if (msg) return senden2(msg, 'RMV');
     if (q === 'rmv') { console.log('RMV fehlgeschlagen (' + fehler + '), Quelle nur RMV'); return fehlerRmv(fehler); }
     console.log('RMV fehlgeschlagen (' + fehler + '), nehme Transitous');
@@ -331,10 +383,40 @@ function streckeLaden(i) {
   });
 }
 
+// Seite i zuletzt angesehen: entscheidet bei mehreren gleich nahen Starts (Startseite nach Standort)
+function merken(i) {
+  var liste = strecken();
+  if (!liste[i]) return;
+  liste[i].zuletzt = Math.floor(Date.now() / 1000);
+  streckenSchreiben(liste);
+}
+
+// Startseite nach Standort (seit 0.50). Kaum bewegt seit dem letzten Öffnen (unter BEWEGT): die Seite vom letzten
+// Mal bleibt. Sonst die Seite mit dem nächsten Start (L.seiteNachOrt). Die Uhr springt nur, solange man noch nicht
+// selbst geblättert oder das Menü geöffnet hat, und fordert die Seite dann selbst an (REQUEST).
+var BEWEGT = 300, GLEICH_NAH = 50;   // Meter
+function standortSprung() {
+  var liste = strecken();
+  if (liste.length < 2) return;
+  standort(function (pos) {
+    if (!pos) return;
+    var vorher = null;
+    try { vorher = JSON.parse(localStorage.getItem('ort')); } catch (e) {}
+    localStorage.setItem('ort', JSON.stringify({ lat: pos.lat, lon: pos.lon }));
+    var aktiv = aktiveSeite();
+    if (vorher && L.entfernung(vorher.lat, vorher.lon, pos.lat, pos.lon) < BEWEGT) { console.log('Standort: kaum bewegt, Seite ' + (aktiv + 1) + ' bleibt'); return; }
+    var i = L.seiteNachOrt(strecken(), pos, aktiv, GLEICH_NAH);
+    console.log('Standort: nächste Seite ' + (i + 1) + (i === aktiv ? ' (schon aktiv)' : ''));
+    if (i === aktiv) return;
+    var m = {}; m[keys.SPRUNG] = i; senden(m);
+  });
+}
+
 Pebble.addEventListener('ready', function () {      // App geöffnet
   ablauf = null;
+  try { if (localStorage.getItem('strecken') && localStorage.removeItem) localStorage.removeItem('strecken'); } catch (e) {}   // Paare bis 0.42
   einrichtungSenden();
-  if (strecken().length) streckeLaden(aktiveSeite());
+  if (strecken().length) { merken(aktiveSeite()); streckeLaden(aktiveSeite()); standortSprung(); }
 });
 
 function wert(p, k) { return p[k] !== undefined ? p[k] : p[keys[k]]; }
@@ -344,16 +426,16 @@ Pebble.addEventListener('appmessage', function (e) { // Select oder Blättern au
   var aktion = wert(p, 'AKTION');
   if (aktion !== undefined) return menueAktion(aktion, wert(p, 'WAHL') || 0);
   var s = wert(p, 'REQUEST');
-  if (s !== undefined) localStorage.setItem('seite', String(s));
+  if (s !== undefined) { localStorage.setItem('seite', String(s)); merken(aktiveSeite()); }
   streckeLaden(aktiveSeite());
 });
 
-// ---------- Uhr-Menü: Strecken an der Uhr anlegen, ändern, löschen ----------
+// ---------- Uhr-Menü: Seiten an der Uhr anlegen, ändern, löschen ----------
 // Listen und Haltestellen immer über Transitous (keine Echtzeit nötig, kein RMV-Kontingent).
 // Uhr -> Handy: AKTION + WAHL. Handy -> Uhr: Liste (L_TITEL, L_ANZAHL, L_AB, L_TEXT[10]) in Blöcken zu 10,
 // Fortschritt L_LADE, L_ANZAHL = -1 heißt "Ablauf beendet, zurück ins Uhr-Menü".
 // Nach jeder Änderung: localStorage -> einrichtungSenden() -> streckeLaden() — dieselben Strecken wie am Handy.
-var A_NEU = 1, A_AENDERN_RUECK = 2, A_AENDERN_START = 3, A_LOESCHEN = 4, A_WAHL = 5, A_ZURUECK = 6, A_LAYOUT = 7, A_UMKREIS = 8, A_QUELLE = 9, A_ABFAHRT = 10, A_DAUER = 11, A_SCHNELL_HIN = 12, A_SCHNELL_RUECK = 13;
+var A_NEU = 1, A_RUECKFAHRT = 2, A_AENDERN = 3, A_LOESCHEN = 4, A_WAHL = 5, A_ZURUECK = 6, A_LAYOUT = 7, A_UMKREIS = 8, A_QUELLE = 9, A_ABFAHRT = 10, A_DAUER = 11, A_SCHNELL = 12, A_HIER = 13;
 var BLOCK = 10;        // muss zu L_TEXT[10] in package.json passen
 var MAXL = 300;        // muss zu MAXL in main.c passen
 var LTXT = 31;         // Zeichen je Listeneintrag (Puffer 32 auf der Uhr)
@@ -365,7 +447,7 @@ function transitousHolen(pfad, fertig) {
   function ende(f, d) { if (!erledigt) { erledigt = true; fertig(f, d); } }
   var xhr = new XMLHttpRequest();
   xhr.open('GET', 'https://api.transitous.org/api/' + pfad, true);
-  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/0.42 (privat)'); } catch (e) {}
+  try { xhr.setRequestHeader('User-Agent', 'pebble-linie8/0.51 (privat)'); } catch (e) {}
   xhr.onload = function () {
     if (xhr.status !== 200) return ende('HTTP ' + xhr.status);
     try { ende(null, JSON.parse(xhr.responseText)); } catch (e) { ende('Antwort unlesbar'); }
@@ -376,7 +458,7 @@ function transitousHolen(pfad, fertig) {
 }
 var L = Logik(transitousHolen, SCHRIFT.F35);
 
-var ablauf = null;     // laufender Menü-Ablauf: { ziel, nurRueck, schritte[], a, linie, erg, b, extra, hin, genau, gen }
+var ablauf = null;     // laufender Menü-Ablauf: { ziel, rueck, schritte[], a, linie, erg, b, extra, genau, gen }
 
 function listeSenden(titel, texte) {
   schlange = schlange.filter(function (x) { return !x.liste; });   // Blöcke einer veralteten Liste verwerfen
@@ -465,7 +547,6 @@ function schrittNah() {
         if (x.um) { ablauf.um = x.um; ablauf.a = null; return schrittLinie(); }
         ablauf.um = null;
         ablauf.a = halt(x.h);
-        vorladen(ablauf.a);                // Rückfahrt-Daten laden, während Linie und Ziel gewählt werden
         schrittLinie();
       });
     }));
@@ -517,7 +598,8 @@ function schrittRichtung() {
     return { t: T(led, klar), r: x };
   });
   eintraege.push({ t: T('ALLE HALTE A-Z', 'Alle Halte A-Z'), alle: true });
-  schritt(T('RICHTUNG', 'Richtung'), eintraege, function (x) {
+  schritt(T('RICHTUNG', 'Richtung'), ohneZiel(eintraege), function (x) {
+    if (x.ohne) return hinSpeichern(null, null);
     if (x.alle) return schrittZiel();
     zielListe(zieleInFolge(x.r));
   });
@@ -555,16 +637,23 @@ function schrittZiel() {
     if (!gruppen[k]) { gruppen[k] = []; reihe.push(k); }
     gruppen[k].push(x);
   });
-  schritt(T('ZIEL A-Z', 'Ziel A-Z'), reihe.map(function (k) { return { t: k + ' (' + gruppen[k].length + ')', liste: gruppen[k] }; }), function (x) {
+  schritt(T('ZIEL A-Z', 'Ziel A-Z'), ohneZiel(reihe.map(function (k) { return { t: k + ' (' + gruppen[k].length + ')', liste: gruppen[k] }; })), function (x) {
+    if (x.ohne) return hinSpeichern(null, null);
     zielListe(x.liste);
   });
 }
 
+// Seite ohne Ziel (seit 0.50): oben in Richtung, Ziel A-Z und Ziel. Nur bei fester Haltestelle, nicht "im Umkreis".
+function ohneZiel(eintraege) {
+  if (ablauf.um) return eintraege;
+  return [{ t: T('OHNE ZIEL', 'Ohne Ziel'), ohne: true }].concat(eintraege);
+}
+
 function zielListe(eintraege) {
-  schritt(T('ZIEL', 'Ziel'), eintraege.slice(0, MAXL), function (x) {
+  schritt(T('ZIEL', 'Ziel'), ohneZiel(eintraege).slice(0, MAXL), function (x) {
+    if (x.ohne) return hinSpeichern(null, null);
     var z = x.z;
     ablauf.b = { id: z.id, name: z.name, lat: z.lat, lon: z.lon };
-    ablauf.genau = null;                 // Rückfahrt-Kandidaten hängen an A und B: nach Zurück und neuer Wahl neu rechnen
     if (ablauf.um) return schrittEinstiegHin(z);
     ablauf.extra = { linien: Object.keys(z.linien), hin: z.hin, rueck: z.rueck };
     schrittPruefen();
@@ -578,9 +667,7 @@ function schrittEinstiegHin(z) {
   if (!liste.length) return fehlerSchritt('leer', function () { schrittEinstiegHin(z); });
   schritt(T('EINSTIEG', 'Einstieg'), liste.map(function (e) { return { t: mitM(e.name, e.m, stadt), e: e }; }), function (x) {
     ablauf.a = halt(x.e);
-    ablauf.genau = null;
     ablauf.extra = { linien: nurLinie(x.e.linien), hin: true, rueck: false };
-    vorladen(ablauf.a);
     schrittPruefen();
   });
 }
@@ -590,9 +677,9 @@ function nurLinie(liste) {              // gewählte Linie aus Schritt 2 (oder a
   return (!l || l === '*') ? liste : liste.filter(function (x) { return x === l; });
 }
 
-// Rückfahrt (seit 0.33). Grundsatz: Ankunft genau am Start A ist der Normalfall; der Umkreis um A gilt nur,
-// wenn er bewusst gewählt wird — nie automatisch. Gespeichert und abgefragt wird immer genau c -> d (ohne d: A).
-// Daten: Fahrten, die an A (bzw. im Umkreis) ankommen — L.ankunftUm, vorgeladen sobald A feststeht.
+// Rückfahrt (seit 0.33, seit 0.50 als eigene Seite über Menü > Rückfahrt). Grundsatz: Ankunft genau am Start A ist
+// der Normalfall; der Umkreis um A gilt nur, wenn er bewusst gewählt wird — nie automatisch. Die neue Seite fährt
+// c -> d (ohne d: A). Daten: Fahrten, die an A (bzw. im Umkreis) ankommen — L.ankunftUm, vorgeladen beim Start des Ablaufs.
 function vorladen(a) {
   if (a.lat === undefined) return;
   L.ankunftUm(a, L.GENAU_R, null, function () { L.ankunftUm(a, umkreis(), null, function () {}); });
@@ -617,28 +704,19 @@ function genauLaden(weiter) {           // Kandidaten mit Ankunft genau an A, ei
   }));
 }
 
-// 4. Hinweg-Linien prüfen; fährt vom Ziel etwas genau nach A zurück: Frage "Zurück ab Ziel?"
+// 4. Linien mit Direktverbindung a -> b prüfen, dann speichern. Die Rückfahrt legt man bei Bedarf danach an
+//    (Menü > Rückfahrt), sie wird nicht mehr automatisch angeboten (seit 0.50).
 function schrittPruefen() {
   ladeSenden(T('PRUEFE', 'Prüfe'), true);
-  var a = ablauf.a, b = ablauf.b, ex = ablauf.extra, offen = 2, hin = null, fehler = null;
-  var fertig = aktuell(function () {
-    if (--offen) return;
-    if (fehler) return fehlerSchritt(fehler, schrittPruefen);
-    ablauf.hin = vereinigen(hin, ex.hin ? ex.linien : []);
-    var amZiel = ablauf.genau.filter(function (k) { return k.ziel; })[0];
-    var zurueck = amZiel ? nurLinie(amZiel.linien) : [];
-    if (!zurueck.length) return schrittRueck(true);
-    schritt(T('ZURUECK AB ZIEL?', 'Zurück ab Ziel?'), [{ t: T('JA', 'Ja'), ja: true }, { t: T('NEIN', 'Nein') }], function (x) {
-      if (x.ja) { var c = halt(b); c.linien = zurueck; return speichern(c, null); }
-      schrittRueck(true);
-    });
-  });
-  L.direkt(a.id, b.id, function (f, l) { if (f) fehler = f; else hin = l; fertig(); });
-  genauLaden(function (f) { if (f) fehler = f; fertig(); });
+  var ex = ablauf.extra;
+  L.direkt(ablauf.a.id, ablauf.b.id, aktuell(function (f, l) {
+    if (f) return fehlerSchritt(f, schrittPruefen);
+    hinSpeichern(ablauf.b, vereinigen(l, ex.hin ? ex.linien : []));
+  }));
 }
 
-// 5. Einstieg bis 2 km um das Ziel, nur mit Direktverbindung genau nach A. Darunter: Umkreis, ohne Rückfahrt.
-//    ohneZiel: das Ziel selbst nicht anbieten (dort wurde "nein" gesagt oder es fährt nichts zurück).
+// 5. Rückfahrt: Einstieg bis 2 km um das Ziel, nur mit Direktverbindung genau nach A, das Ziel selbst zuerst.
+//    Darunter: Umkreis. Nichts gewünscht: Zurück-Taste. ohneZiel: das Ziel selbst nicht anbieten.
 function schrittRueck(ohneZiel) {
   ladeSenden(T('SUCHE', 'Suche'), true);
   genauLaden(function (f) {
@@ -648,12 +726,10 @@ function schrittRueck(ohneZiel) {
     var eintraege = liste.map(function (k) { return { t: einstiegText(k, stadt), k: k }; });
     var titel = eintraege.length ? T('RUECKFAHRT AB', 'Rückfahrt ab') : T('NICHTS NACH ', 'Nichts nach ') + nameT(ablauf.a.name, stadt);
     eintraege.push({ t: T('UMKREIS ', 'Umkreis ') + umkreisText(r), umkreis: r });
-    eintraege.push({ t: T('OHNE RUECKFAHRT', 'Ohne Rückfahrt'), ohne: true });
     schritt(titel, eintraege, function (x) {
-      if (x.ohne) return speichern(null, null);
       if (x.umkreis) return schrittEinstieg(x.umkreis);
       var c = halt(x.k); c.linien = x.k.linien;
-      speichern(c, null);
+      rueckSpeichern(c, null);
     });
   });
 }
@@ -670,10 +746,10 @@ function schrittEinstieg(r) {
       titel = T('NICHTS IM UMKREIS', 'Nichts im Umkreis');
       var groesser = L.UMKREISE.filter(function (u) { return u > r; })[0];
       if (groesser) eintraege.push({ t: T('UMKREIS ', 'Umkreis ') + umkreisText(groesser), umkreis: groesser });
-      eintraege.push({ t: T('OHNE RUECKFAHRT', 'Ohne Rückfahrt'), ohne: true });
+      eintraege.push({ t: T('ABBRECHEN', 'Abbrechen'), ohne: true });
     }
     schritt(titel, eintraege, function (x) {
-      if (x.ohne) return speichern(null, null);
+      if (x.ohne) return menueEnde(true);
       if (x.umkreis) return schrittEinstieg(x.umkreis);
       schrittAusstieg(x.k);
     });
@@ -688,54 +764,62 @@ function schrittAusstieg(k) {
   });
   schritt(T('AUSSTIEG', 'Ausstieg'), eintraege, function (x) {
     var c = halt(k); c.linien = x.z.linien;
-    speichern(c, x.z.start ? null : halt(x.z));
+    rueckSpeichern(c, x.z.start ? null : halt(x.z));
   });
 }
 
-// 6. Strecke speichern, Kurznamen automatisch, Seite anzeigen
-function speichern(c, d) {
-  var liste = strecken(), stadt = L.stadtVon(ablauf.a.name), st, i = ablauf.ziel;
-  function mitKurz(h) { return h && { id: h.id, name: h.name, kurz: L.kurzname(h.name, stadt), lat: h.lat, lon: h.lon }; }
-  if (ablauf.nurRueck) {                 // Fahrt ändern -> Rückfahrt: nur c ersetzen
-    st = liste[i];
-    if (!st) return menueEnde();
-    var cl = c ? c.linien : [];
-    st.c = mitKurz(c);
-    if (c && d) st.d = mitKurz(d); else delete st.d;
-    st.ohneRueck = !c;
-    delete st.linienRueck;               // neue Rückfahrt: wieder der gemeinsame Filter
-    if (st.alle) st.linien = vereinigen(st.linien, cl);
-    else if (c && !cl.some(function (l) { return st.linien.indexOf(l) >= 0; })) st.linien = vereinigen(st.linien, cl);
+// 6. Seite speichern, Kurznamen automatisch, Seite anzeigen. neu = { a, b (null = ohne Ziel), linien, alle }.
+//    Neue Fahrt: hinten anfügen. Fahrt ändern: an derselben Stelle ersetzen. Rückfahrt: direkt hinter der Seite
+//    einfügen, von der sie ausgeht. Mehr als MAXS: nichts speichern (das Uhr-Menü bietet es dann gar nicht an).
+function mitKurz(h, stadt) { return h ? { id: h.id, name: h.name, kurz: L.kurzname(h.name, stadt), lat: h.lat, lon: h.lon } : null; }
+
+function speichern(neu) {
+  var liste = strecken(), i = ablauf.ziel;
+  if (ablauf.rueck) {
+    if (liste.length >= MAXS) return menueEnde();
+    i = Math.min(i + 1, liste.length);
+    liste.splice(i, 0, neu);
+  } else if (i >= 0 && i < liste.length) {
+    liste[i] = neu;
   } else {
-    var l = ablauf.linie, cl2 = c ? c.linien : [];
-    st = { a: { id: ablauf.a.id, name: ablauf.a.name, kurz: L.kurzname(ablauf.a.name, L.stadtVon(ablauf.a.name)), lat: ablauf.a.lat, lon: ablauf.a.lon },
-           b: mitKurz(ablauf.b), c: mitKurz(c), ohneRueck: !c };
-    if (c && d) st.d = mitKurz(d);
-    if (l && l !== '*') {
-      st.alle = false;
-      st.linien = (c && cl2.indexOf(l) < 0) ? vereinigen([l], cl2) : [l];
-    } else {
-      st.alle = true;
-      st.linien = vereinigen(ablauf.hin, cl2);
-    }
-    if (i >= 0 && i < liste.length) liste[i] = st;
-    else { if (liste.length >= MAXS) return menueEnde(); liste.push(st); i = liste.length - 1; }
+    if (liste.length >= MAXS) return menueEnde();
+    liste.push(neu); i = liste.length - 1;
   }
-  localStorage.setItem('strecken', JSON.stringify(liste));
+  neu.zuletzt = Math.floor(Date.now() / 1000);
+  streckenSchreiben(liste);
   localStorage.setItem('seite', String(i));
-  console.log('Menü: Strecke ' + (i + 1) + ' gespeichert: ' + st.a.kurz + ' -> ' + st.b.kurz + ', zurück ab ' + (st.c ? st.c.kurz : '-') + (st.d ? ' nach ' + st.d.kurz : '') + ' [' + st.linien.join(',') + (st.alle ? ' alle' : '') + ']');
+  console.log('Menü: Seite ' + (i + 1) + ' gespeichert: ' + neu.a.kurz + (neu.b ? ' -> ' + neu.b.kurz : ' (alle Abfahrten)') +
+              ' [' + neu.linien.join(',') + (neu.alle ? ' alle' : '') + ']');
   ablauf = null;
   einrichtungSenden();                   // Uhr schließt das Menü, sobald die Einrichtung ankommt
   streckeLaden(i);
+}
+
+// Neue Fahrt / Fahrt ändern. b = null: ohne Ziel. hin = Linien mit Direktverbindung (nur mit Ziel).
+function hinSpeichern(b, hin) {
+  var l = ablauf.linie, stadt = L.stadtVon(ablauf.a.name);
+  var neu = { a: mitKurz(ablauf.a, stadt), b: mitKurz(b, stadt) };
+  if (l && l !== '*') { neu.alle = false; neu.linien = [l]; }
+  else { neu.alle = true; neu.linien = b ? (hin || []) : Object.keys((ablauf.erg && ablauf.erg.linien) || {}).sort(L.sortDe); }
+  speichern(neu);
+}
+
+// Rückfahrt als neue Seite c -> d (ohne d: zurück genau zum Start A der Ausgangsseite). Linienfilter der
+// Ausgangsseite gilt weiter, soweit die Linien auch zurückfahren; sonst die Linien, die zurückfahren.
+function rueckSpeichern(c, d) {
+  var stadt = L.stadtVon(ablauf.a.name), cl = c.linien || [], erlaubt = ablauf.erlaubt;
+  var passend = erlaubt ? cl.filter(function (l) { return erlaubt.indexOf(l) >= 0; }) : [];
+  speichern({ a: mitKurz(c, stadt), b: mitKurz(d || ablauf.a, stadt), alle: !erlaubt,
+              linien: (passend.length ? passend : cl).slice().sort(L.sortDe) });
 }
 
 function loeschen(i) {
   var liste = strecken();
   ablauf = null;
   if (i >= 0 && i < liste.length) liste.splice(i, 1);
-  localStorage.setItem('strecken', JSON.stringify(liste));
+  streckenSchreiben(liste);
   localStorage.setItem('seite', String(Math.max(0, Math.min(i, liste.length - 1))));
-  console.log('Menü: Strecke ' + (i + 1) + ' gelöscht, ' + liste.length + ' übrig');
+  console.log('Menü: Seite ' + (i + 1) + ' gelöscht, ' + liste.length + ' übrig');
   einrichtungSenden();
   if (liste.length) streckeLaden(aktiveSeite());
 }
@@ -779,24 +863,25 @@ function menueAktion2(aktion, wahl) {
     if (strecken().length) streckeLaden(aktiveSeite());
     return;
   }
-  if (aktion === A_NEU || aktion === A_AENDERN_START) {
+  if (aktion === A_NEU || aktion === A_AENDERN) {
     ablauf = { ziel: aktion === A_NEU ? -1 : wahl, schritte: [], gen: 0, laedt: true };
     return schrittNah();
   }
-  if (aktion === A_AENDERN_RUECK) {
+  if (aktion === A_RUECKFAHRT) {         // neue Seite hinter Seite wahl, zurück zu deren Start
     var st = strecken()[wahl];
-    if (!st) return menueEnde();
-    ablauf = { ziel: wahl, nurRueck: true, schritte: [], gen: 0, laedt: true, a: halt(st.a), b: halt(st.b),
+    if (!st || !st.b || strecken().length >= MAXS) return menueEnde();
+    ablauf = { ziel: wahl, rueck: true, schritte: [], gen: 0, laedt: true, a: halt(st.a), b: halt(st.b),
                extra: null, erlaubt: st.alle ? null : st.linien };
     return koordinaten(ablauf.a, aktuell(function (f0) {
       koordinaten(ablauf.b, aktuell(function (f) {
-        if (f0 || f) return fehlerSchritt(f0 || f, function () { menueAktion2(A_AENDERN_RUECK, wahl); });
+        if (f0 || f) return fehlerSchritt(f0 || f, function () { menueAktion2(A_RUECKFAHRT, wahl); });
         vorladen(ablauf.a);
         schrittRueck(false);
       }));
     }));
   }
-  if (aktion === A_SCHNELL_HIN || aktion === A_SCHNELL_RUECK) return schnellStart(wahl, aktion === A_SCHNELL_RUECK);
+  if (aktion === A_SCHNELL) return schnellStart(wahl);
+  if (aktion === A_HIER) return hierLaden(wahl);
   if (!ablauf) return menueEnde();
   if (aktion === A_ZURUECK) {
     ablauf.gen++;                        // laufende Abfragen verwerfen
@@ -815,7 +900,7 @@ function menueAktion2(aktion, wahl) {
 }
 
 // ---------- Schnellere Abfahrt (seit 0.38) ----------
-// Menü > Schnellere Abfahrt > Hin (vorausgewählt) oder Rück. Bezug ist die nächste angezeigte Fahrt x -> y.
+// Menü > Schnellere Abfahrt (nur Seiten mit Ziel). Bezug ist die nächste angezeigte Fahrt x -> y.
 // Gesucht: Fahrten ab dem Umkreis um x, die im Umkreis um y früher ankommen (L.schneller).
 // Liste 1 Einstieg nach Entfernung vom Standort, Liste 2 Ausstieg (y zuerst), Liste 3 die Fahrten mit Ab- und Ankunft,
 // dann Mini-Menü Zurück (Anzeige ohne Änderung) / Übernehmen (seit 0.39: Strecke in dieser Richtung umstellen).
@@ -828,8 +913,8 @@ function hm(t) {                        // UTC-Sekunden -> "HH:MM" deutsche Zeit
 // Bezugsfahrten x -> y aus derselben Quelle wie die Anzeige (RMV mit Echtzeit, sonst Transitous), bis zu 10.
 // fertig(fehler, [{ ab, an, linie, plan }]) ohne Ausfälle; an = 0: Fahrtdauer unbekannt. Welche zählt, entscheidet
 // bezugWaehlen, sobald der Standort da ist.
-function bezugHolen(st, rueck, fertig) {
-  var von = rueck ? rueckStart(st) : st.a, nach = rueck ? rueckZiel(st) : st.b, linien = linienFuer(st, rueck);
+function bezugHolen(st, fertig) {
+  var von = st.a, nach = st.b, linien = linienFuer(st);
   function weiter(f, erg) {
     if (f !== null && f !== undefined) return fertig(f === STATUS_NETZ ? 'kein Netz' : 'fehler');
     fertig(null, erg.fahrten.filter(function (x) { return x.d !== AUSFALL; }).map(function (r) {
@@ -850,15 +935,13 @@ function bezugWaehlen(liste, pos, x) {
   return liste.filter(function (b) { return b.ab >= jetzt + geh; })[0] || null;
 }
 
-function schnellStart(i, rueck) {
+function schnellStart(i) {
   var st = strecken()[i];
-  if (!st) return menueEnde();
-  var x = rueck ? rueckStart(st) : st.a, y = rueck ? rueckZiel(st) : st.b;
-  ablauf = { ziel: i, schnell: true, rueck: rueck, schritte: [], gen: 0, laedt: true, x: x && halt(x), y: halt(y) };
-  if (!x) return schritt(T('KEINE RUECKFAHRT', 'Keine Rückfahrt'), [{ t: T('ZURUECK', 'Zurück') }], function () { menueEnde(); });
+  if (!st || !st.b) return menueEnde();
+  ablauf = { ziel: i, schnell: true, schritte: [], gen: 0, laedt: true, x: halt(st.a), y: halt(st.b) };
   koordinaten(ablauf.x, aktuell(function (f0) {
     koordinaten(ablauf.y, aktuell(function (f) {
-      if (f0 || f) return fehlerSchritt(f0 || f, function () { schnellStart(i, rueck); });
+      if (f0 || f) return fehlerSchritt(f0 || f, function () { schnellStart(i); });
       schrittSchneller();
     }));
   }));
@@ -887,7 +970,7 @@ function schrittSchneller() {
       });
     }));
   });
-  bezugHolen(st, a.rueck, function (f, b) { if (f) fehler = f; else bezuege = b; fertig(); });
+  bezugHolen(st, function (f, b) { if (f) fehler = f; else bezuege = b; fertig(); });
   standort(function (p) { pos = p; fertig(); });   // ohne Standort: Entfernung und Gehzeit ab x
 }
 
@@ -915,38 +998,55 @@ function schrittSchnellWahl(e, z, f) {
   });
 }
 
-// Übernehmen: Einstieg und Ausstieg der gewählten Richtung ersetzen, Linienfilter dieser Richtung = gewählte Linie.
-// Die andere Richtung bleibt, wie sie war: Hin geändert -> Rückfahrt startet weiter am alten Ziel (c) und endet
-// weiter am alten Start (d). Rück geändert -> c und d neu, Hinfahrt unberührt.
+// Übernehmen: Einstieg und Ausstieg der Seite ersetzen, Linienfilter = gewählte Linie (seit 0.39, seit 0.50 ohne Richtung).
 function schnellUebernehmen(e, z, f) {
   var liste = strecken(), i = ablauf.ziel, st = liste[i];
   if (!st) return menueEnde(true);
   var stadt = L.stadtVon(st.a.name);
-  function mitKurz(h) { return { id: h.id, name: h.name, kurz: L.kurzname(h.name, stadt), lat: h.lat, lon: h.lon }; }
-  var x = ablauf.rueck ? rueckStart(st) : st.a, neuX = e.name === x.name ? x : mitKurz(e);
-  if (!ablauf.rueck) {
-    if (!st.ohneRueck && !st.c) st.c = st.b;
-    if (!st.ohneRueck && !st.d && neuX !== st.a) st.d = st.a;
-    st.a = neuX;
-    if (!z.ziel) st.b = mitKurz(z);
-    st.linienHin = [f.l];
-  } else {
-    st.c = neuX;
-    if (!z.ziel) st.d = mitKurz(z);       // Ausstieg = bisheriges Ziel: d bleibt (bzw. ohne d: Start)
-    st.linienRueck = [f.l];
-  }
-  // Seite zeigt die Linie mit. Vorher den Filter der anderen Richtung festschreiben, sonst fährt die neue Linie dort mit
-  if (!st.alle) {
-    if (ablauf.rueck) { if (!st.linienHin) st.linienHin = st.linien.slice(); }
-    else if (!st.linienRueck) st.linienRueck = st.linien.slice();
-    st.linien = vereinigen(st.linien, [f.l]);
-  }
-  localStorage.setItem('strecken', JSON.stringify(liste));
+  if (e.name !== st.a.name) st.a = mitKurz(e, stadt);
+  if (!z.ziel) st.b = mitKurz(z, stadt);
+  st.alle = false;
+  st.linien = [f.l];
+  streckenSchreiben(liste);
   localStorage.setItem('seite', String(i));
-  console.log('Schneller: übernommen ' + (ablauf.rueck ? 'rück ' + st.c.kurz + ' -> ' + rueckZiel(st).kurz : 'hin ' + st.a.kurz + ' -> ' + st.b.kurz) + ' [' + f.l + ']');
+  console.log('Schneller: übernommen ' + st.a.kurz + ' -> ' + st.b.kurz + ' [' + f.l + ']');
   ablauf = null;
-  einrichtungSenden();                   // Uhr schließt das Menü und zeigt die Strecke
+  einrichtungSenden();                   // Uhr schließt das Menü und zeigt die Seite
   streckeLaden(i);
+}
+
+// ---------- Abfahrten hier (seit 0.51) ----------
+// Menü > Abfahrten hier: nächste Haltestelle vom Standort, alle Linien mit Endziel, ohne eine Seite anzulegen.
+// Auf der Uhr blättert hoch/runter zur nächstnäheren (WAHL = Nummer in der Liste, das Handy rechnet sie um).
+// Nummer 0 holt den Standort neu, andere nutzen die Liste von eben (bis 10 min alt). Platz HIER hinter den Seiten.
+var HIER = MAXS, hierListe = null;
+function hierLaden(k) {
+  function fehlerAn(status, led, klar) {
+    var m = {};
+    m[keys.SEITE] = HIER; m[keys.STATUS] = status; m[keys.HIER_NAME] = led; m[keys.HIER_KLAR] = klar;
+    m[keys.STAND] = Math.floor(Date.now() / 1000);
+    senden(m);
+  }
+  function weiter() {
+    var liste = hierListe.liste, n = liste.length;
+    if (!n) return fehlerAn(STATUS_FEHLER, 'NICHTS IN DER NAEHE', 'Nichts in der Nähe');
+    var i = ((k % n) + n) % n, h = liste[i], stadt = L.stadtVon(h.name), extra = {};
+    extra[keys.HIER_NAME] = L.utf8Kuerzen(L.kurzname(h.name, stadt), 31);
+    extra[keys.HIER_KLAR] = L.utf8Kuerzen(L.klarname(h.name, stadt), 31);
+    extra[keys.HIER_NR] = i;
+    extra[keys.HIER_N] = n;
+    console.log('Hier: ' + (i + 1) + '/' + n + ' ' + h.name + ' ' + h.m + ' m');
+    abfahrtenLaden({ a: halt(h), b: null, alle: true, linien: [] }, HIER, extra, 'hier');
+  }
+  if (k !== 0 && hierListe && Date.now() - hierListe.zeit < 600000) return weiter();
+  standort(function (pos) {
+    if (!pos) return fehlerAn(STATUS_FEHLER, 'KEIN STANDORT', 'Kein Standort');
+    L.naechsteHaltestellen(pos.lat, pos.lon, NAH, function (f, liste) {
+      if (f) return fehlerAn(f === 'kein Netz' ? STATUS_NETZ : STATUS_FEHLER, 'KEINE HALTESTELLEN', 'Keine Haltestellen');
+      hierListe = { liste: liste, zeit: Date.now() };
+      weiter();
+    });
+  });
 }
 
 // ---------- Einstellungen: eingebettete Seite ----------
@@ -981,7 +1081,7 @@ Pebble.addEventListener('webviewclosed', function (e) {
     if (daten.dauer === 'an' || daten.dauer === 'aus') localStorage.setItem('dauer', daten.dauer);
     if (L.UMKREISE.indexOf(daten.umkreis) >= 0) localStorage.setItem('umkreis', String(daten.umkreis));
     ablauf = null;
-    localStorage.setItem('strecken', JSON.stringify(daten.strecken.slice(0, MAXS)));
+    streckenSchreiben(daten.strecken.slice(0, MAXS));
     localStorage.setItem('seite', '0');
     einrichtungSenden();
     if (daten.strecken.length) streckeLaden(0);

@@ -1,13 +1,16 @@
 // Linie 8 — Uhr-Teil. LED-Haltestellenanzeige: 66 x 76 Punkte im Raster 3 px, Punkt 2 x 2 px.
-// Bis zu 8 Strecken (Haltestellenpaare), eingerichtet am Handy oder im Uhr-Menü. Alle Zeiten kommen als
+// Bis zu 8 Seiten, eingerichtet am Handy oder im Uhr-Menü. Seit 0.50 ist eine Seite eine Richtung: Haltestelle, klein
+// darunter das Ziel und drei Abfahrten; ohne Ziel alle Abfahrten der Haltestelle mit Endziel. Die Rückfahrt ist eine
+// eigene Seite (Menü > Rückfahrt). Beim Öffnen springt die App auf die Seite mit dem nächsten Start. Seit 0.51
+// Menü > Abfahrten hier: nächste Haltestelle ohne gespeicherte Seite, hoch/runter = nächstnähere. Alle Zeiten kommen als
 // Unix-Sekunden (UTC); Anzeige immer in deutscher Zeit, unabhängig von der Zeitzone der Uhr.
-// Hoch/Runter = Strecke wechseln, Select = neu laden, Select lang = Menü, Zurück = beenden.
+// Hoch/Runter = Seite wechseln, Select = neu laden, Select lang = Menü, Zurück = beenden.
 // Drei Ansichten: LED-Haltestellenanzeige (Standard), „Klar“ (weiß, Systemschrift, 0.31) und „Phosphor“ (Radar-Grün,
 // Pixelschrift wie das Watchface Phosphor, 0.34), umschaltbar am Handy (Einstellungsseite) oder an der Uhr
 // (Menü > Einstellungen > Ansicht). Seit 0.34 je Abfahrt die Fahrtdauer zum Ziel; Minuten überall mit Strich (13').
 // Seit 0.35 einstellbar: Abfahrtszeit Fahrplan (Standard, Verspätung als +2') oder aktuell (Zeit mit Verspätung,
 // in Klar/Phosphor farbig), Fahrtdauer an (Standard) oder aus, Quelle Auto / nur RMV / nur Transitous.
-// Uhr-Menü (Version 0.30): Hauptmenü und "Fahrt ändern" kennt die Uhr selbst; alle weiteren Listen
+// Uhr-Menü (Version 0.30): Hauptmenü und Einstellungen kennt die Uhr selbst; alle weiteren Listen
 // (Haltestellen, Linien, Ziele, Rückfahrt) rechnet das Handy und schickt sie in Blöcken zu 10.
 #include <pebble.h>
 #include "led_font.h"
@@ -16,7 +19,7 @@
 #define DOT   2
 #define COLS  66
 #define ROWS  76
-#define MAXD  3            // muss zu HIN[3] / RUECK[3] in package.json passen
+#define MAXD  3            // muss zu AB[3] in package.json passen
 #define MAXS  8            // muss zu NAME_A[8] / NAME_B[8] passen
 #define NAMELEN 32
 #define LINLEN  6
@@ -41,40 +44,56 @@
 
 enum { ST_LEER = -2, ST_LADE = -1, ST_SOLL = 0, ST_LIVE = 1, ST_NETZ = 2, ST_FEHLER = 3 };
 enum { M_ANZEIGE, M_LISTE, M_LADE };                       // was die Uhr gerade zeigt
-enum { L_HANDY, L_MENUE, L_AENDERN, L_EINST, L_ANSICHT, L_UMKREIS, L_QUELLE, L_SCHNELL };  // woher die Liste stammt
+enum { L_HANDY, L_MENUE, L_EINST, L_ANSICHT, L_UMKREIS, L_QUELLE };  // woher die Liste stammt
 enum { QUELLE_AUTO = 0, QUELLE_RMV = 1, QUELLE_TRANS = 2 };                     // wie QUELLEN in index.js
 enum { ABF_PLAN = 0, ABF_AKTUELL = 1 };                                          // Abfahrtszeit: Fahrplan oder mit Verspätung
 enum { E_ANSICHT, E_ABFAHRT, E_DAUER, E_QUELLE, E_UMKREIS };                     // Reihenfolge im Menü Einstellungen
 enum { LAYOUT_LED = 0, LAYOUT_KLAR = 1, LAYOUT_PHOSPHOR = 2, LAYOUT_INVERS = 3 };   // INVERS: LED schwarz auf Weiß (0.42)
 #define LAYOUT_OK(v) ((v) >= LAYOUT_LED && (v) <= LAYOUT_INVERS)
-enum { A_UNTERMENUE = 0, A_NEU = 1, A_AENDERN_RUECK = 2, A_AENDERN_START = 3, A_LOESCHEN = 4,
+enum { A_NEU = 1, A_RUECKFAHRT = 2, A_AENDERN = 3, A_LOESCHEN = 4,
        A_WAHL = 5, A_ZURUECK = 6, A_LAYOUT = 7, A_UMKREIS = 8, A_QUELLE = 9, A_ABFAHRT = 10, A_DAUER = 11,
-       A_SCHNELL_HIN = 12, A_SCHNELL_RUECK = 13,
+       A_SCHNELL = 12, A_HIER = 13,
        A_EINST = -1, A_ANSICHT = -2, A_SET_LED = -3, A_SET_KLAR = -4,
        A_UMK = -5, A_SET_U500 = -6, A_SET_U1000 = -7, A_SET_U2000 = -8, A_SET_PHOSPHOR = -9,
        A_QLL = -10, A_SET_QAUTO = -11, A_SET_QRMV = -12, A_SET_QTRANS = -13,
-       A_ABF_UM = -14, A_DAUER_UM = -15, A_SCHNELL = -16, A_SET_INVERS = -17 };   // negative: nur auf der Uhr                        // AKTION an das Handy, wie in index.js
+       A_ABF_UM = -14, A_DAUER_UM = -15, A_SET_INVERS = -17, A_HIER_START = -18 };   // negative: nur auf der Uhr                        // AKTION an das Handy, wie in index.js
 
 static Window *s_window;
 static Layer *s_layer;
 static AppTimer *s_timeout;
 typedef struct {
-  char name[2][NAMELEN];            // 0 = Start, 1 = Rückfahrt-Haltestelle — LED-Schreibweise
+  char name[2][NAMELEN];            // 0 = Haltestelle, 1 = Ziel (leer: Seite ohne Ziel) — LED-Schreibweise
   char klar[2][NAMELEN];            // dieselben für die Ansicht Klar, mit Umlauten (UTF-8)
-  int32_t dep[2][MAXD];             // 0 = hin ab Start, 1 = zurück ab Ziel
-  char lin[2][MAXD][LINLEN];
-  int16_t del[2][MAXD];             // Verspätung in Minuten (negativ = zu früh), AUSFALL = fällt aus
-  char steig[2][MAXD][STEIGLEN];
-  int16_t dur[2][MAXD];             // Fahrtdauer bis zum Ziel in Minuten (Ankunft − Abfahrt, mit Echtzeit), 0 = unbekannt           // Steig der Abfahrt ("B"), leer = keine Angabe
+  int32_t dep[MAXD];                // Abfahrt (UTC, mit Verspätung), 0 = keine
+  char lin[MAXD][LINLEN];
+  int16_t del[MAXD];                // Verspätung in Minuten (negativ = zu früh), AUSFALL = fällt aus
+  char steig[MAXD][STEIGLEN];       // Steig der Abfahrt ("B"), leer = keine Angabe
+  int16_t dur[MAXD];                // Fahrtdauer bis zum Ziel in Minuten (Ankunft − Abfahrt, mit Echtzeit), 0 = unbekannt
+  char end[MAXD][NAMELEN];          // Endziel der Fahrt (nur ohne Ziel), LED-Schreibweise
+  char endk[MAXD][NAMELEN];         // dasselbe für Klar
   int32_t stand;
   int status;
   char quelle[8];                   // "RMV" oder "TRANS" (Transitous), steht vor der Uhrzeit des Stands
 } Strecke;
 
-static Strecke s_str[MAXS];
+#define HIER MAXS          // Platz für „Abfahrten hier“ hinter den Seiten, wie HIER in index.js
+static Strecke s_str[MAXS + 1];
+static bool s_hier;                 // „Abfahrten hier“ wird gezeigt statt der Seite s_seite
+static int s_hier_nr, s_hier_n;     // Nummer der Haltestelle in der Liste vom Handy, Länge der Liste (0 = noch unbekannt)
 static int s_anzahl = -1;           // -1 = noch keine Einrichtung vom Handy erhalten
 static int s_seite = 0;
 static int s_status_start = ST_LADE; // Status, solange keine Strecke da ist
+static bool s_beruehrt;             // Taste gedrückt seit dem Start: kein Sprung nach Standort mehr
+static Strecke *aktuelle(void) { return &s_str[s_hier ? HIER : s_seite]; }
+static bool zeigt_seite(void) { return s_hier || s_anzahl > 0; }
+// Rechts unten bzw. oben: Seite "2/5", bei „Abfahrten hier“ "H1/10", davor "WI", wenn die Uhr nicht deutsche Zeit hat
+static void seitenzeichen(char *re, size_t n, bool fremd) {
+  if (s_hier) {
+    if (s_hier_n > 0) snprintf(re, n, "%sH%d/%d", fremd ? "WI" : "", s_hier_nr + 1, s_hier_n);
+    else snprintf(re, n, "%sH", fremd ? "WI" : "");
+  } else if (s_anzahl > 1) snprintf(re, n, "%s%d/%d", fremd ? "WI" : "", s_seite + 1, s_anzahl);
+  else snprintf(re, n, "%s", fremd ? "WI" : "");
+}
 static AppTimer *s_lauf;
 static int s_lauf_off;
 static uint32_t s_lauf_rest;
@@ -231,83 +250,98 @@ static void linie(const char *l, int x, int y) {
   else KLEIN(l, x, y + 1);
 }
 
-// Indizes der nächsten zwei noch nicht abgefahrenen Busse einer Richtung.
-static int naechste(const Strecke *s, int r, time_t now, int idx[2]) {
+// Indizes der nächsten (bis zu MAXD) noch nicht abgefahrenen Fahrten.
+static int naechste(const Strecke *s, time_t now, int idx[MAXD]) {
   int n = 0;
-  for (int i = 0; i < MAXD && n < 2; i++)
-    if (s->dep[r][i] != 0 && s->dep[r][i] >= now) idx[n++] = i;
+  for (int i = 0; i < MAXD; i++)
+    if (s->dep[i] != 0 && s->dep[i] >= now) idx[n++] = i;
   return n;
 }
 
-// Zeitspalte für die ganze Seite gleich, damit oben und unten bündig stehen.
+static bool hat_ziel(const Strecke *s) { return s->name[1][0] != '\0'; }
+
+// Zeitspalte für die ganze Seite gleich, damit die Zeiten bündig stehen.
 static int steig_w(const char *st) { return st[0] ? 1 + text_w(F35, F35_N, st, 1) : 0; }   // klein hinter der Linie
 
 static int zeitspalte(const Strecke *s, time_t now) {
-  int lw = 5, idx[2];
+  int lw = 5, idx[MAXD];
   bool steig = false;
-  for (int r = 0; r < 2; r++) {
-    const int n = naechste(s, r, now, idx);
-    for (int k = 0; k < n; k++) {
-      const int w = linie_w(s->lin[r][idx[k]]) + steig_w(s->steig[r][idx[k]]);
-      if (w > lw) lw = w;
-      if (s->steig[r][idx[k]][0]) steig = true;
-    }
+  const int n = naechste(s, now, idx);
+  for (int k = 0; k < n; k++) {
+    const int w = linie_w(s->lin[idx[k]]) + steig_w(s->steig[idx[k]]);
+    if (w > lw) lw = w;
+    if (s->steig[idx[k]][0]) steig = true;
   }
   const int x = 1 + lw + (steig ? 2 : 4);             // gedimmter Steig darf näher an die Zeit: kostet kaum Platz
   return x < 13 ? 13 : x;
 }
 
-static void richtung(const Strecke *s, int r, int y, time_t now, int xt) {
-  int idx[2];
-  const int n = naechste(s, r, now, idx);
-  for (int k = 0; k < n; k++) {
-    const int i = idx[k], yy = y + k * 9, v = s->del[r][i];
-    int h, m;
-    char zeit[32], rechts[16], vs[16];
-    linie(s->lin[r][i], 1, yy);
-    if (s->steig[r][i][0]) {                             // Steig klein und gedimmt hinter der Linie, damit "8 B" nicht als Linie 8B gelesen wird
-      s_dim_zeichnen = true;
-      KLEIN(s->steig[r][i], 1 + linie_w(s->lin[r][i]) + 1, yy + 2);
-      s_dim_zeichnen = false;
-    }
-    if (v == AUSFALL) { KLEIN("FAELLT AUS", xt, yy + 2); continue; }
-    const int vz = s_abfahrt == ABF_AKTUELL ? 0 : v;    // aktuell: Zeit enthält die Verspätung, kein "+2'"
-    berlin_hm(s->dep[r][i] - vz * 60, &h, &m);         // vorne die Fahrplanzeit (oder die aktuelle)
-    snprintf(zeit, sizeof(zeit), "%02d:%02d", h, m);
-    GROSS(zeit, xt, yy, 1);
-    const int min = (s->dep[r][i] - now) / 60;           // Restminuten mit Verspätung
-    rechts[0] = '\0';
-    if (min < 100) snprintf(rechts, sizeof(rechts), "%d'", min);
-    bool rgross = true;
-    int rand = rechts[0] ? COLS - 1 - text_w(F57, F57_N, rechts, 1) : COLS;   // linke Kante der Restminuten
-    int x = xt + text_w(F57, F57_N, zeit, 1) + 2;        // hinter der Zeit: Verspätung hell, dann Fahrtdauer gedimmt
-    if (rechts[0] && x + 1 > rand) {                     // breite Linie + Steig: schon die Zeit stößt an die Restminuten
+// Eine Abfahrt, 7 Punkte hoch ab Zeile yy: Linie, Steig gedimmt, Zeit, Verspätung, Fahrtdauer gedimmt, Restminuten.
+static void abfahrt_zeile(const Strecke *s, int i, int yy, time_t now, int xt) {
+  const int v = s->del[i];
+  int h, m;
+  char zeit[32], rechts[16], vs[16];
+  linie(s->lin[i], 1, yy);
+  if (s->steig[i][0]) {                                // Steig klein und gedimmt hinter der Linie, damit "8 B" nicht als Linie 8B gelesen wird
+    s_dim_zeichnen = true;
+    KLEIN(s->steig[i], 1 + linie_w(s->lin[i]) + 1, yy + 2);
+    s_dim_zeichnen = false;
+  }
+  if (v == AUSFALL) { KLEIN("FAELLT AUS", xt, yy + 2); return; }
+  const int vz = s_abfahrt == ABF_AKTUELL ? 0 : v;    // aktuell: Zeit enthält die Verspätung, kein "+2'"
+  berlin_hm(s->dep[i] - vz * 60, &h, &m);            // vorne die Fahrplanzeit (oder die aktuelle)
+  snprintf(zeit, sizeof(zeit), "%02d:%02d", h, m);
+  GROSS(zeit, xt, yy, 1);
+  const int min = (s->dep[i] - now) / 60;              // Restminuten mit Verspätung
+  rechts[0] = '\0';
+  if (min < 100) snprintf(rechts, sizeof(rechts), "%d'", min);
+  bool rgross = true;
+  int rand = rechts[0] ? COLS - 1 - text_w(F57, F57_N, rechts, 1) : COLS;   // linke Kante der Restminuten
+  int x = xt + text_w(F57, F57_N, zeit, 1) + 2;        // hinter der Zeit: Verspätung hell, dann Fahrtdauer gedimmt
+  if (rechts[0] && x + 1 > rand) {                     // breite Linie + Steig: schon die Zeit stößt an die Restminuten
+    rgross = false;
+    rand = COLS - 1 - text_w(F35, F35_N, rechts, 1);
+    if (x + 1 > rand) { rechts[0] = '\0'; rand = COLS; }
+  }
+  if (vz != 0) {
+    snprintf(vs, sizeof(vs), "%+d'", vz);
+    const int vende = x + text_w(F35, F35_N, vs, 1);
+    if (rechts[0] && rgross && vende + 3 > rand) {               // zu eng: Restminuten klein, passt auch das nicht, weglassen
       rgross = false;
       rand = COLS - 1 - text_w(F35, F35_N, rechts, 1);
-      if (x + 1 > rand) { rechts[0] = '\0'; rand = COLS; }
+      if (vende + 3 > rand) { rechts[0] = '\0'; rand = COLS; }
+    } else if (rechts[0] && vende + 3 > rand) { rechts[0] = '\0'; rand = COLS; }
+    KLEIN(vs, x, yy + 2);
+    x = vende + 2;
+  }
+  if (s_dauer && s->dur[i] > 0) {                      // Fahrtdauer nur, wenn sie ohne Verdrängen passt
+    char ds[8];
+    snprintf(ds, sizeof(ds), "%d'", s->dur[i]);
+    if (x + text_w(F35, F35_N, ds, 1) + 3 <= rand) {
+      s_dim_zeichnen = true; KLEIN(ds, x, yy + 2); s_dim_zeichnen = false;
     }
-    if (vz != 0) {
-      snprintf(vs, sizeof(vs), "%+d'", vz);
-      const int vende = x + text_w(F35, F35_N, vs, 1);
-      if (rechts[0] && rgross && vende + 3 > rand) {               // zu eng: Restminuten klein, passt auch das nicht, weglassen
-        rgross = false;
-        rand = COLS - 1 - text_w(F35, F35_N, rechts, 1);
-        if (vende + 3 > rand) { rechts[0] = '\0'; rand = COLS; }
-      } else if (rechts[0] && vende + 3 > rand) { rechts[0] = '\0'; rand = COLS; }
-      KLEIN(vs, x, yy + 2);
-      x = vende + 2;
+  }
+  if (rechts[0]) { if (rgross) GROSS(rechts, rand, yy, 1); else KLEIN(rechts, rand, yy + 2); }
+}
+
+// Abfahrten ab Zeile y. Mit Ziel drei Zeilen im Abstand 11; ohne Ziel je Fahrt das Endziel klein und gedimmt
+// darunter, unter der Zeitspalte (Abstand 15).
+static void abfahrten(const Strecke *s, int y, time_t now) {
+  int idx[MAXD];
+  const int n = naechste(s, now, idx), xt = zeitspalte(s, now);
+  const bool ziel = hat_ziel(s);
+  for (int k = 0; k < n; k++) {
+    const int yy = y + k * (ziel ? 11 : 15);
+    abfahrt_zeile(s, idx[k], yy, now, xt);
+    if (!ziel && s->end[idx[k]][0]) {
+      s_dim_zeichnen = true; klein_bis(s->end[idx[k]], xt, yy + 9, COLS - 1); s_dim_zeichnen = false;
     }
-    if (s_dauer && s->dur[r][i] > 0) {                   // Fahrtdauer nur, wenn sie ohne Verdrängen passt
-      char ds[8];
-      snprintf(ds, sizeof(ds), "%d'", s->dur[r][i]);
-      if (x + text_w(F35, F35_N, ds, 1) + 3 <= rand) {
-        s_dim_zeichnen = true; KLEIN(ds, x, yy + 2); s_dim_zeichnen = false;
-      }
-    }
-    if (rechts[0]) { if (rgross) GROSS(rechts, rand, yy, 1); else KLEIN(rechts, rand, yy + 2); }
   }
   if (n == 0) GROSS("--:--", 13, y, 1);
 }
+
+// Ziel klein unter der Haltestelle: "> LUISENPLATZ"
+static void ziel_text(char *buf, size_t n, const Strecke *s) { snprintf(buf, n, "> %s", s->name[1]); }
 
 static bool zu_lang(const char *name) { return text_w(F35, F35_N, name, 1) > COLS - 2; }
 
@@ -375,13 +409,17 @@ static void raster_fuellen(void) {
   GROSS(buf, MITTE_GROSS(buf, 2), 1, 2);                 // Zeilen 1-14
 
   int status = s_status_start;
-  if (s_anzahl > 0) {
-    const Strecke *s = &s_str[s_seite];
-    const int xt = zeitspalte(s, now);
-    kopf(s->name[0], 17);
-    richtung(s, 0, 24, now, xt);                         // Zeilen 24-39
-    kopf(s->name[1], 43);
-    richtung(s, 1, 50, now, xt);                         // Zeilen 50-65
+  if (zeigt_seite()) {
+    const Strecke *s = aktuelle();
+    kopf(s->name[0], 17);                                // Zeilen 17-21
+    if (hat_ziel(s)) {
+      char z[NAMELEN + 4];
+      ziel_text(z, sizeof(z), s);
+      s_dim_zeichnen = true; kopf(z, 25); s_dim_zeichnen = false;   // Zeilen 25-29
+      abfahrten(s, 35, now);                             // Zeilen 35-63
+    } else {
+      abfahrten(s, 25, now);                             // Zeilen 25-67, je Fahrt mit Endziel
+    }
     status = s->status;
   } else if (s_anzahl == 0) {
     kopf("KEINE STRECKE", 17);
@@ -390,15 +428,15 @@ static void raster_fuellen(void) {
   }
 
   // Statuszeile 70-74: Quelle und Stand links; rechts "WI" (Uhr nicht auf deutscher Zeit) und Seite
-  if (s_anzahl == 0) status = ST_LEER;
+  if (!zeigt_seite()) status = ST_LEER;
   switch (status) {
     case ST_LADE:   snprintf(buf, sizeof(buf), "LADE"); break;
     case ST_NETZ:   snprintf(buf, sizeof(buf), "KEIN NETZ"); break;
     case ST_FEHLER: snprintf(buf, sizeof(buf), "FEHLER"); break;
     case ST_SOLL: case ST_LIVE: {
       int sh, sm;
-      berlin_hm(s_str[s_seite].stand, &sh, &sm);
-      const char *q = s_str[s_seite].quelle[0] ? s_str[s_seite].quelle : "STAND";
+      berlin_hm(aktuelle()->stand, &sh, &sm);
+      const char *q = aktuelle()->quelle[0] ? aktuelle()->quelle : "STAND";
       snprintf(buf, sizeof(buf), "%s %02d:%02d", q, sh, sm);
       break;
     }
@@ -408,8 +446,7 @@ static void raster_fuellen(void) {
   char re[32] = "";
   const struct tm *lokal = localtime(&now);
   const bool fremd = lokal->tm_hour != h || lokal->tm_min != m;
-  if (s_anzahl > 1) snprintf(re, sizeof(re), "%s%d/%d", fremd ? "WI" : "", s_seite + 1, s_anzahl);
-  else if (fremd) snprintf(re, sizeof(re), "WI");
+  seitenzeichen(re, sizeof(re), fremd);
   KLEIN(re, COLS - 1 - text_w(F35, F35_N, re, 1), 70);
 }
 
@@ -457,68 +494,78 @@ static void k_fuss(GContext *ctx, const char *links, bool punkt, GColor farbe, b
   }
 }
 
-static void k_richtung(GContext *ctx, const Strecke *s, int r, int y, time_t now) {
-  k_text(ctx, "ab", s_f14, GRect(8, y, 20, 18), GTextAlignmentLeft, K_DUNKEL);
-  k_text(ctx, s->klar[r][0] ? s->klar[r] : s->name[r], s_f18b, GRect(26, y - 4, 166, 24), GTextAlignmentLeft, GColorBlack);
-  int idx[2];
-  const int n = naechste(s, r, now, idx);
-  for (int k = 0; k < 2; k++) {
-    const int yy = y + 22 + k * 29;
+// Seite in Klar (0.50): "ab" Haltestelle groß, darunter "nach" Ziel; drei Abfahrten mit Zeit in LECO 32.
+// Ohne Ziel steht unter jeder Zeit das Endziel der Fahrt.
+static void k_seite(GContext *ctx, const Strecke *s, time_t now) {
+  const bool ziel = hat_ziel(s);
+  k_text(ctx, "ab", s_f14, GRect(8, 50, 24, 18), GTextAlignmentLeft, K_DUNKEL);
+  k_text(ctx, s->klar[0][0] ? s->klar[0] : s->name[0], s_f24b, GRect(28, 40, 166, 30), GTextAlignmentLeft, GColorBlack);
+  if (ziel) {
+    k_text(ctx, "nach", s_f14, GRect(8, 70, 30, 18), GTextAlignmentLeft, K_DUNKEL);
+    k_text(ctx, s->klar[1][0] ? s->klar[1] : s->name[1], s_f18, GRect(38, 66, 156, 24), GTextAlignmentLeft, K_DUNKEL);
+  }
+  const int y0 = ziel ? 92 : 72, dy = ziel ? 39 : 45;
+  int idx[MAXD];
+  const int n = naechste(s, now, idx);
+  for (int k = 0; k < MAXD; k++) {
+    const int yy = y0 + k * dy;
     graphics_context_set_stroke_color(ctx, K_GRAU);
     graphics_draw_line(ctx, GPoint(8, yy), GPoint(192, yy));
     if (k >= n) {
-      if (k == 0) k_text(ctx, "keine Fahrt", s_f18, GRect(8, yy + 2, 184, 24), GTextAlignmentLeft, K_DUNKEL);
+      if (k == 0) k_text(ctx, "keine Fahrt", s_f18, GRect(8, yy + 6, 184, 24), GTextAlignmentLeft, K_DUNKEL);
       continue;
     }
-    const int i = idx[k], v = s->del[r][i];
-    const char *lin = s->lin[r][i];
-    int bw = k_breite(lin, s_f18b) + 10;
-    if (bw < 26) bw = 26;
+    const int i = idx[k], v = s->del[i];
+    const char *lin = s->lin[i];
+    int bw = k_breite(lin, s_f24b) + 12;
+    if (bw < 32) bw = 32;
     graphics_context_set_fill_color(ctx, K_ROT);
-    graphics_fill_rect(ctx, GRect(8, yy + 5, bw, 20), 4, GCornersAll);
-    k_text(ctx, lin, s_f18b, GRect(8, yy + 1, bw, 22), GTextAlignmentCenter, GColorWhite);
+    graphics_fill_rect(ctx, GRect(8, yy + 6, bw, 27), 4, GCornersAll);
+    k_text(ctx, lin, s_f24b, GRect(8, yy + 1, bw, 30), GTextAlignmentCenter, GColorWhite);
     char zeit[16], buf[16];
     int h, m;
     const int vz = (v == AUSFALL || s_abfahrt == ABF_AKTUELL) ? 0 : v;   // aktuell: Zeit mit Verspätung, orange
-    berlin_hm(s->dep[r][i] - vz * 60, &h, &m);                       // vorne die Fahrplanzeit (oder die aktuelle)
+    berlin_hm(s->dep[i] - vz * 60, &h, &m);                          // vorne die Fahrplanzeit (oder die aktuelle)
     snprintf(zeit, sizeof(zeit), "%02d:%02d", h, m);
-    const int xt = 8 + bw + 7;
-    k_text(ctx, zeit, s_f28b, GRect(xt, yy - 5, 80, 34), GTextAlignmentLeft,
+    const int xt = 8 + bw + 6;
+    if (!ziel && s->endk[i][0])                                        // Endziel unter der Zeit
+      k_text(ctx, s->endk[i], s_f14b, GRect(xt, yy + 28, 192 - xt, 18), GTextAlignmentLeft, K_DUNKEL);
+    k_text(ctx, zeit, s_f_uhr, GRect(xt, yy - 1, 100, 40), GTextAlignmentLeft,
            v == AUSFALL ? K_GRAU : (v != vz ? K_ORANGE : GColorBlack));
     if (v == AUSFALL) {
-      k_text(ctx, "fällt aus", s_f18b, GRect(100, yy + 2, 92, 24), GTextAlignmentRight, K_ROT);
+      k_text(ctx, "fällt aus", s_f18b, GRect(100, yy + 8, 92, 24), GTextAlignmentRight, K_ROT);
       continue;
     }
-    const int xz = xt + k_breite(zeit, s_f28b) + 2;                 // rechts neben der Zeit: oben Verspätung, unten Steig + Fahrtdauer
+    const int xz = xt + k_breite(zeit, s_f_uhr) + 3;                 // rechts neben der Zeit: oben Verspätung, unten Steig + Fahrtdauer
     int oben = xz, unten = xz;                                       // rechte Kanten der beiden kleinen Zeilen
     if (vz != 0) {
       snprintf(buf, sizeof(buf), "%+d'", vz);
-      k_text(ctx, buf, s_f14b, GRect(xz, yy - 1, 40, 18), GTextAlignmentLeft, K_ORANGE);
+      k_text(ctx, buf, s_f14b, GRect(xz, yy + 1, 40, 18), GTextAlignmentLeft, K_ORANGE);
       oben = xz + k_breite(buf, s_f14b);
     }
-    if (s->steig[r][i][0]) {
-      int sw = k_breite(s->steig[r][i], s_f14b) + 6;
+    if (s->steig[i][0]) {
+      int sw = k_breite(s->steig[i], s_f14b) + 6;
       if (sw < 13) sw = 13;
       graphics_context_set_fill_color(ctx, K_DUNKEL);
-      graphics_fill_rect(ctx, GRect(xz, yy + 15, sw, 13), 2, GCornersAll);
-      k_text(ctx, s->steig[r][i], s_f14b, GRect(xz, yy + 11, sw, 16), GTextAlignmentCenter, GColorWhite);
-      unten = xz + sw + 4;
+      graphics_fill_rect(ctx, GRect(xz, yy + 20, sw, 13), 2, GCornersAll);
+      k_text(ctx, s->steig[i], s_f14b, GRect(xz, yy + 16, sw, 16), GTextAlignmentCenter, GColorWhite);
+      unten = xz + sw + 3;
     }
     char ds[8] = "", rs[8] = "";
-    if (s_dauer && s->dur[r][i] > 0) snprintf(ds, sizeof(ds), "%d'", s->dur[r][i]);
-    const int min = (s->dep[r][i] - now) / 60;                       // Restminuten mit Verspätung
+    if (s_dauer && s->dur[i] > 0) snprintf(ds, sizeof(ds), "%d'", s->dur[i]);
+    const int min = (s->dep[i] - now) / 60;                          // Restminuten mit Verspätung
     if (min < 100) snprintf(rs, sizeof(rs), "%d'", min);
     GFont rf = s_f28b;
     int rand = rs[0] ? 192 - k_breite(rs, rf) : 200;
     const int dende = ds[0] ? unten + k_breite(ds, s_f14) : unten;
-    if (ds[0] && (dende > oben ? dende : oben) + 6 > rand) ds[0] = '\0';   // zu eng: erst die Fahrtdauer weg ...
+    if (ds[0] && (dende > oben ? dende : oben) + 5 > rand) ds[0] = '\0';   // zu eng: erst die Fahrtdauer weg ...
     const int links = (unten > oben ? unten : oben);
-    if (rs[0] && links + 6 > rand) { rf = s_f18b; rand = 192 - k_breite(rs, rf); }   // ... dann Restminuten klein
-    if (rs[0] && links + 6 > rand) rs[0] = '\0';
-    if (ds[0]) k_text(ctx, ds, s_f14, GRect(unten, yy + 11, 40, 18), GTextAlignmentLeft, K_DUNKEL);
+    if (rs[0] && links + 5 > rand) { rf = s_f18b; rand = 192 - k_breite(rs, rf); }   // ... dann Restminuten klein
+    if (rs[0] && links + 5 > rand) rs[0] = '\0';
+    if (ds[0]) k_text(ctx, ds, s_f14, GRect(unten, yy + 16, 40, 18), GTextAlignmentLeft, K_DUNKEL);
     if (rs[0]) {
-      if (rf == s_f28b) k_text(ctx, rs, rf, GRect(100, yy - 5, 92, 34), GTextAlignmentRight, GColorBlack);
-      else k_text(ctx, rs, rf, GRect(100, yy + 3, 92, 24), GTextAlignmentRight, GColorBlack);
+      if (rf == s_f28b) k_text(ctx, rs, rf, GRect(100, yy + 1, 92, 34), GTextAlignmentRight, GColorBlack);
+      else k_text(ctx, rs, rf, GRect(100, yy + 9, 92, 24), GTextAlignmentRight, GColorBlack);
     }
   }
 }
@@ -532,17 +579,20 @@ static void k_anzeige(GContext *ctx) {
   berlin_hm(now, &h, &m);
   snprintf(buf, sizeof(buf), "%02d:%02d", h, m);
   k_text(ctx, buf, s_f_uhr, GRect(7, 1, 130, 40), GTextAlignmentLeft, GColorWhite);
-  if (s_anzahl > 1) {
+  if (s_hier) {
+    if (s_hier_n > 0) snprintf(buf, sizeof(buf), "hier %d/%d", s_hier_nr + 1, s_hier_n);
+    else snprintf(buf, sizeof(buf), "hier");
+    k_text(ctx, buf, s_f14b, GRect(110, 1, 84, 18), GTextAlignmentRight, K_GRAU);
+  } else if (s_anzahl > 1) {
     snprintf(buf, sizeof(buf), "%d/%d", s_seite + 1, s_anzahl);
     k_text(ctx, buf, s_f14b, GRect(110, 1, 84, 18), GTextAlignmentRight, K_GRAU);
   }
   k_text(ctx, "Wiesbaden", s_f14, GRect(100, 18, 94, 18), GTextAlignmentRight, K_GRAU);
 
   int status = s_status_start;
-  if (s_anzahl > 0) {
-    const Strecke *s = &s_str[s_seite];
-    k_richtung(ctx, s, 0, 44, now);
-    k_richtung(ctx, s, 1, 126, now);
+  if (zeigt_seite()) {
+    const Strecke *s = aktuelle();
+    k_seite(ctx, s, now);
     status = s->status;
   } else if (s_anzahl == 0) {
     k_text(ctx, "Keine Strecke", s_f24b, GRect(0, 74, 200, 30), GTextAlignmentCenter, GColorBlack);
@@ -558,7 +608,7 @@ static void k_anzeige(GContext *ctx) {
     case ST_NETZ:   snprintf(buf, sizeof(buf), "Kein Netz"); farbe = GColorRed; break;
     case ST_FEHLER: snprintf(buf, sizeof(buf), "Fehler"); farbe = GColorRed; break;
     case ST_SOLL: case ST_LIVE: {
-      const Strecke *s = &s_str[s_seite];
+      const Strecke *s = aktuelle();
       const bool rmv = !strcmp(s->quelle, "RMV");
       int sh, sm;
       berlin_hm(s->stand, &sh, &sm);
@@ -644,28 +694,34 @@ static void p_punktlinie(GContext *ctx, int y) {
 }
 
 static bool p_zu_lang(const char *t) { return P_W(t, 2) > 188; }
-#define P_NAME_X 30        // Haltestellenname hinter "AB"
+#define P_NAME_X 42        // Haltestellenname hinter "AB", Ziel hinter "NACH"
 static bool p_name_zu_lang(const char *t) { return P_W(t, 2) > 196 - P_NAME_X; }
 
-// Name hinter "AB": passt er, steht er; sonst läuft er wie bei LED (2 px je Schritt)
-static void p_name(GContext *ctx, const char *name, int y) {
-  P_KLEIN("AB", 4, y, P_GRAU);
+// Name hinter "AB" bzw. "NACH": passt er, steht er; sonst läuft er wie bei LED (2 px je Schritt)
+static void p_name(GContext *ctx, const char *vor, const char *name, int y, GColor c) {
+  P_KLEIN(vor, 4, y, P_GRAU);
   const int w = P_W(name, 2);
-  if (w <= 196 - P_NAME_X) { P_KLEIN(name, P_NAME_X, y, P_HELL); return; }
+  if (w <= 196 - P_NAME_X) { P_KLEIN(name, P_NAME_X, y, c); return; }
   const int periode = w + LAUF_LUECKE * 2, x = P_NAME_X - (s_lauf_off * 2) % periode;
-  p_text(ctx, F35, F35_N, F35_H, name, x, y, 2, P_HELL, P_NAME_X, 196);
-  p_text(ctx, F35, F35_N, F35_H, name, x + periode, y, 2, P_HELL, P_NAME_X, 196);
+  p_text(ctx, F35, F35_N, F35_H, name, x, y, 2, c, P_NAME_X, 196);
+  p_text(ctx, F35, F35_N, F35_H, name, x + periode, y, 2, c, P_NAME_X, 196);
 }
 
-static void p_richtung(GContext *ctx, const Strecke *s, int r, int y, time_t now) {
-  p_name(ctx, s->name[r], y);
-  int idx[2];
-  const int n = naechste(s, r, now, idx);
-  if (n == 0) P_KLEIN("KEINE FAHRT", 4, y + 22, P_GRAU);
+// Seite in Phosphor (0.50): AB Haltestelle, NACH Ziel; drei Abfahrten. Ohne Ziel je Fahrt das Endziel darunter.
+static void p_seite(GContext *ctx, const Strecke *s, time_t now) {
+  const bool ziel = hat_ziel(s);
+  p_name(ctx, "AB", s->name[0], 59, P_HELL);
+  if (ziel) p_name(ctx, "NACH", s->name[1], 75, P_GRAU);
+  p_punktlinie(ctx, ziel ? 92 : 76);
+  const int y = ziel ? 101 : 84, dy = ziel ? 38 : 43;
+  int idx[MAXD];
+  const int n = naechste(s, now, idx);
+  if (n == 0) P_KLEIN("KEINE FAHRT", 4, y + 6, P_GRAU);
   for (int k = 0; k < n; k++) {
-    const int i = idx[k], yy = y + 16 + k * 30, v = s->del[r][i];
+    const int i = idx[k], yy = y + k * dy, v = s->del[i];
     const bool ausfall = v == AUSFALL;
-    const char *lin = s->lin[r][i];
+    const char *lin = s->lin[i];
+    if (!ziel && s->end[i][0]) p_text(ctx, F35, F35_N, F35_H, s->end[i], 4, yy + 25, 2, P_GRAU, 0, 196);
     // Linie invers: grünes Kästchen, schwarze Schrift; Steig als dunkle Lasche dahinter
     const bool gross = gross_moeglich(lin);
     const int lw = (gross ? P_GW(lin, 2) : P_W(lin, 2)) + 8;
@@ -674,18 +730,18 @@ static void p_richtung(GContext *ctx, const Strecke *s, int r, int y, time_t now
     if (gross) P_GROSS(lin, 8, yy + 4, 2, GColorBlack);
     else P_KLEIN(lin, 8, yy + 6, GColorBlack);
     int x = 4 + lw;
-    if (s->steig[r][i][0]) {
-      const int sw = P_W(s->steig[r][i], 2) + 6;
+    if (s->steig[i][0]) {
+      const int sw = P_W(s->steig[i], 2) + 6;
       graphics_context_set_fill_color(ctx, P_GITTER);
       graphics_fill_rect(ctx, GRect(x + 1, yy, sw, 21), 0, GCornerNone);
-      P_KLEIN(s->steig[r][i], x + 4, yy + 6, P_HELL);
+      P_KLEIN(s->steig[i], x + 4, yy + 6, P_HELL);
       x += 1 + sw;
     }
     x += 5;
     char zeit[8], buf[12], ds[8] = "", rs[8] = "";
     int h, m;
     const int vz = (ausfall || s_abfahrt == ABF_AKTUELL) ? 0 : v;   // aktuell: Zeit mit Verspätung, gelb
-    berlin_hm(s->dep[r][i] - vz * 60, &h, &m);                  // vorne die Fahrplanzeit (oder die aktuelle)
+    berlin_hm(s->dep[i] - vz * 60, &h, &m);                     // vorne die Fahrplanzeit (oder die aktuelle)
     snprintf(zeit, sizeof(zeit), "%02d:%02d", h, m);
     if (ausfall) {
       P_GROSS(zeit, x, yy, 3, P_GRAU);
@@ -700,8 +756,8 @@ static void p_richtung(GContext *ctx, const Strecke *s, int r, int y, time_t now
       P_KLEIN(buf, xz, yy, P_WARN);
       oben = xz + P_W(buf, 2);
     }
-    if (s_dauer && s->dur[r][i] > 0) snprintf(ds, sizeof(ds), "%d'", s->dur[r][i]);
-    const int min = (s->dep[r][i] - now) / 60;                     // Restminuten mit Verspätung
+    if (s_dauer && s->dur[i] > 0) snprintf(ds, sizeof(ds), "%d'", s->dur[i]);
+    const int min = (s->dep[i] - now) / 60;                        // Restminuten mit Verspätung
     if (min < 100) snprintf(rs, sizeof(rs), "%d'", min);
     int rsc = 3, rand = rs[0] ? 196 - P_GW(rs, 3) : 200;
     const int dende = ds[0] ? xz + P_W(ds, 2) : xz;
@@ -711,6 +767,7 @@ static void p_richtung(GContext *ctx, const Strecke *s, int r, int y, time_t now
     if (ds[0]) P_KLEIN(ds, xz, yy + 11, P_GRAU);
     if (rs[0]) P_GROSS(rs, rand, rsc == 3 ? yy : yy + 7, rsc, P_TEXT);
   }
+  p_punktlinie(ctx, 214);
 }
 
 static void p_anzeige(GContext *ctx) {
@@ -725,15 +782,14 @@ static void p_anzeige(GContext *ctx) {
   berlin_hm(now, &h, &m);
   const struct tm *lokal = localtime(&now);
   const bool fremd = lokal->tm_hour != h || lokal->tm_min != m;
-  if (s_anzahl > 1) snprintf(re, sizeof(re), "%s%d/%d", fremd ? "WI" : "", s_seite + 1, s_anzahl);
-  else if (fremd) snprintf(re, sizeof(re), "WI");
+  seitenzeichen(re, sizeof(re), fremd);
   P_KLEIN(re, 196 - P_W(re, 2), 4, P_GRAU);
   snprintf(buf, sizeof(buf), "%02d:%02d", h, m);
   P_GROSS(buf, 4, 18, 4, P_TEXT);
 
   // rechts neben der Uhrzeit: Punkt (cyan = Echtzeit, grün = Fahrplan, gelb = Fehler), Quelle, Stand
-  int status = s_anzahl > 0 ? s_str[s_seite].status : s_status_start;
-  if (s_anzahl == 0) status = ST_LEER;
+  int status = zeigt_seite() ? aktuelle()->status : s_status_start;
+  if (!zeigt_seite()) status = ST_LEER;
   GColor punkt = P_GITTER;
   const char *z1 = "", *z2 = "";
   char stand[8] = "";
@@ -742,7 +798,7 @@ static void p_anzeige(GContext *ctx) {
     case ST_NETZ:   z1 = "KEIN"; z2 = "NETZ"; punkt = P_WARN; break;
     case ST_FEHLER: z1 = "FEHLER"; punkt = P_WARN; break;
     case ST_SOLL: case ST_LIVE: {
-      const Strecke *s = &s_str[s_seite];
+      const Strecke *s = aktuelle();
       int sh, sm;
       berlin_hm(s->stand, &sh, &sm);
       snprintf(stand, sizeof(stand), "%02d:%02d", sh, sm);
@@ -761,12 +817,8 @@ static void p_anzeige(GContext *ctx) {
   }
   p_punktlinie(ctx, 51);
 
-  if (s_anzahl > 0) {
-    const Strecke *s = &s_str[s_seite];
-    p_richtung(ctx, s, 0, 60, now);
-    p_punktlinie(ctx, 135);
-    p_richtung(ctx, s, 1, 145, now);
-    p_punktlinie(ctx, 220);
+  if (zeigt_seite()) {
+    p_seite(ctx, aktuelle(), now);
   } else if (s_anzahl == 0) {
     P_KLEIN("KEINE STRECKE", 100 - P_W("KEINE STRECKE", 2) / 2, 90, P_TEXT);
     P_KLEIN("SELECT LANG:", 100 - P_W("SELECT LANG:", 2) / 2, 120, P_GRAU);
@@ -840,10 +892,12 @@ static bool lauf_noetig(void) {
   if (s_modus == M_LISTE)
     return s_lanz > 0 && (s_layout == LAYOUT_KLAR ? k_zu_lang(s_ltext[s_lsel]) :
                           s_layout == LAYOUT_PHOSPHOR ? p_zu_lang(s_ltext[s_lsel]) : zeile_zu_lang(s_ltext[s_lsel]));
-  if (s_modus != M_ANZEIGE || s_anzahl <= 0 || s_layout == LAYOUT_KLAR) return false;
-  const Strecke *s = &s_str[s_seite];
+  if (s_modus != M_ANZEIGE || !zeigt_seite() || s_layout == LAYOUT_KLAR) return false;
+  const Strecke *s = aktuelle();
   if (s_layout == LAYOUT_PHOSPHOR) return p_name_zu_lang(s->name[0]) || p_name_zu_lang(s->name[1]);
-  return zu_lang(s->name[0]) || zu_lang(s->name[1]);
+  char z[NAMELEN + 4];
+  ziel_text(z, sizeof(z), s);
+  return zu_lang(s->name[0]) || (hat_ziel(s) && zu_lang(z));
 }
 
 static void lauf_cb(void *data) {
@@ -864,7 +918,7 @@ static void lauf_starten(void) {
 static void anzeige_zeigen(void);
 static bool menue_empfangen(DictionaryIterator *it);
 static int *aktueller_status(void) {
-  return s_anzahl > 0 ? &s_str[s_seite].status : &s_status_start;
+  return zeigt_seite() ? &aktuelle()->status : &s_status_start;
 }
 
 static void timeout_cb(void *data) {
@@ -880,7 +934,14 @@ static void warten_starten(void) {
   layer_mark_dirty(s_layer);
 }
 
+static void aktion_abschicken(int aktion, int wahl);
+static void hier_anfordern(void) {                    // Handy lädt Haltestelle Nummer s_hier_nr der Liste am Standort
+  aktion_abschicken(A_HIER, s_hier_nr);
+  warten_starten();
+}
+
 static void anfordern(void) {
+  if (s_hier) { hier_anfordern(); return; }
   if (s_anzahl == 0) return;
   DictionaryIterator *it;
   if (app_message_outbox_begin(&it) == APP_MSG_OK) {
@@ -946,41 +1007,20 @@ static void anzeige_zeigen(void) {
 
 static void menue_zeigen(void) {                       // Hauptmenü, kennt die Uhr selbst
   char buf[LTXT], nr[16] = "";
+  const bool ziel = s_anzahl > 0 && hat_ziel(&s_str[s_seite]);
   if (s_anzahl > 1) snprintf(nr, sizeof(nr), " %d", s_seite + 1);
   liste_beginnen(L_MENUE, T("MENUE", "Menü"));
-  // Schnellere Abfahrt (seit 0.38) ganz oben: die häufigste Frage unterwegs, Select lang + Select + Select
-  if (s_anzahl > 0) eintrag(T("SCHNELLERE ABFAHRT", "Schnellere Abfahrt"), A_SCHNELL);
+  eintrag(T("ABFAHRTEN HIER", "Abfahrten hier"), A_HIER_START);   // seit 0.51 ganz oben: nächste Haltestelle, nichts gespeichert
+  // Schnellere Abfahrt (seit 0.38) ganz oben: die häufigste Frage unterwegs, Select lang + Select.
+  // Rückfahrt (seit 0.50) legt eine neue Seite hinter dieser an. Beide brauchen ein Ziel.
+  if (ziel) eintrag(T("SCHNELLERE ABFAHRT", "Schnellere Abfahrt"), A_SCHNELL);
+  if (ziel && s_anzahl < MAXS) eintrag(T("RUECKFAHRT", "Rückfahrt"), A_RUECKFAHRT);
   if (s_anzahl < MAXS) eintrag(T("NEUE FAHRT", "Neue Fahrt"), A_NEU);
   if (s_anzahl > 0) {
-    snprintf(buf, sizeof(buf), T("FAHRT%s AENDERN", "Fahrt%s ändern"), nr);  eintrag(buf, A_UNTERMENUE);
+    snprintf(buf, sizeof(buf), T("FAHRT%s AENDERN", "Fahrt%s ändern"), nr);  eintrag(buf, A_AENDERN);
     snprintf(buf, sizeof(buf), T("FAHRT%s LOESCHEN", "Fahrt%s löschen"), nr); eintrag(buf, A_LOESCHEN);
   }
   eintrag(T("EINSTELLUNGEN", "Einstellungen"), A_EINST);
-  lauf_starten();
-  layer_mark_dirty(s_layer);
-}
-
-static void aendern_zeigen(void) {                     // Fahrt ändern: Rückfahrt (vorausgewählt) oder Start
-  char buf[LTXT];
-  if (s_anzahl > 1) snprintf(buf, sizeof(buf), T("FAHRT %d AENDERN", "Fahrt %d ändern"), s_seite + 1);
-  else snprintf(buf, sizeof(buf), T("FAHRT AENDERN", "Fahrt ändern"));
-  liste_beginnen(L_AENDERN, buf);
-  eintrag(T("RUECKFAHRT", "Rückfahrt"), A_AENDERN_RUECK);
-  eintrag(T("START", "Start"), A_AENDERN_START);
-  layer_mark_dirty(s_layer);
-}
-
-// Schnellere Abfahrt: Hin (vorausgewählt) oder Rück, mit dem Start der jeweiligen Richtung. Ohne Rückweg nur Hin.
-static void schnell_zeigen(void) {
-  char buf[LTXT];
-  const Strecke *s = &s_str[s_seite];
-  liste_beginnen(L_SCHNELL, T("RICHTUNG", "Richtung"));
-  snprintf(buf, sizeof(buf), T("HIN AB %s", "Hin ab %s"), s_layout == LAYOUT_KLAR ? s->klar[0] : s->name[0]);
-  eintrag(buf, A_SCHNELL_HIN);
-  if (strcmp(s->name[1], "KEIN RUECKWEG")) {
-    snprintf(buf, sizeof(buf), T("RUECK AB %s", "Rück ab %s"), s_layout == LAYOUT_KLAR ? s->klar[1] : s->name[1]);
-    eintrag(buf, A_SCHNELL_RUECK);
-  }
   lauf_starten();
   layer_mark_dirty(s_layer);
 }
@@ -1172,6 +1212,26 @@ static void liste_bewegen(int d) {
   layer_mark_dirty(s_layer);
 }
 
+// Abfahrten hier (0.51): Platz HIER leeren, Anzeige zeigen, Handy holt Standort und nächste Haltestelle
+static void hier_starten(void) {
+  Strecke *s = &s_str[HIER];
+  memset(s, 0, sizeof(*s));
+  strcpy(s->name[0], "STANDORT");
+  strcpy(s->klar[0], "Standort ...");
+  s_hier = true;
+  s_hier_nr = s_hier_n = 0;
+  anzeige_zeigen();
+  hier_anfordern();
+}
+
+static void hier_beenden(void) {                      // Zurück: wieder die gespeicherten Seiten
+  s_hier = false;
+  s_lauf_off = 0;
+  lauf_starten();
+  if (s_anzahl > 0) anfordern();
+  layer_mark_dirty(s_layer);
+}
+
 static void liste_waehlen(void) {
   if (s_lanz <= 0) return;
   if (s_lart == L_HANDY) {
@@ -1179,8 +1239,7 @@ static void liste_waehlen(void) {
     return;
   }
   const int a = s_lakt[s_lsel];
-  if (a == A_UNTERMENUE) aendern_zeigen();
-  else if (a == A_SCHNELL) schnell_zeigen();
+  if (a == A_HIER_START) hier_starten();
   else if (a == A_EINST) einstellungen_zeigen(E_ANSICHT);
   else if (a == A_ABF_UM) abfahrt_umschalten();
   else if (a == A_DAUER_UM) dauer_umschalten();
@@ -1202,9 +1261,12 @@ static void liste_waehlen(void) {
 
 static void zurueck(void) {
   switch (s_modus) {
-    case M_ANZEIGE: window_stack_pop(true); break;     // App beenden
+    case M_ANZEIGE:
+      if (s_hier) hier_beenden();                      // aus „Abfahrten hier“ zurück zu den Seiten
+      else window_stack_pop(true);                     // App beenden
+      break;
     case M_LISTE:
-      if (s_lart == L_AENDERN || s_lart == L_EINST || s_lart == L_SCHNELL) menue_zeigen();
+      if (s_lart == L_EINST) menue_zeigen();
       else if (s_lart == L_ANSICHT) einstellungen_zeigen(E_ANSICHT);
       else if (s_lart == L_UMKREIS) einstellungen_zeigen(E_UMKREIS);
       else if (s_lart == L_QUELLE) einstellungen_zeigen(E_QUELLE);
@@ -1220,7 +1282,18 @@ static void zurueck(void) {
 
 static void empfangen(DictionaryIterator *it, void *ctx) {
   if (menue_empfangen(it)) { layer_mark_dirty(s_layer); return; }
-  Tuple *t = dict_find(it, MESSAGE_KEY_ANZAHL);
+  Tuple *t = dict_find(it, MESSAGE_KEY_SPRUNG);
+  if (t) {                                               // Startseite nach Standort (0.50): nur, solange nichts gedrückt wurde
+    if (!s_beruehrt && !s_hier && s_modus == M_ANZEIGE && s_anzahl > 1) {
+      s_seite = begrenzen(t->value->int32, 0, s_anzahl - 1);
+      s_lauf_off = 0;
+      lauf_starten();
+      anfordern();                                       // Handy merkt sich die Seite und lädt sie
+    }
+    layer_mark_dirty(s_layer);
+    return;
+  }
+  t = dict_find(it, MESSAGE_KEY_ANZAHL);
   if (t) {                                               // Einrichtung: Anzahl, Namen, aktive Seite
     s_anzahl = begrenzen(t->value->int32, 0, MAXS);
     for (int i = 0; i < MAXS; i++) {
@@ -1253,31 +1326,48 @@ static void empfangen(DictionaryIterator *it, void *ctx) {
     if (s_anzahl > 0 && s_str[s_seite].stand == 0) s_str[s_seite].status = ST_LADE;
     s_lauf_off = 0;
     lauf_starten();
-  } else if ((t = dict_find(it, MESSAGE_KEY_SEITE))) {   // Abfahrten einer Strecke
-    const int i = begrenzen(t->value->int32, 0, MAXS - 1);
+  } else if ((t = dict_find(it, MESSAGE_KEY_SEITE))) {   // Abfahrten einer Seite
+    const int i = begrenzen(t->value->int32, 0, HIER);
     Strecke *s = &s_str[i];
+    if (i == HIER) {                                     // Abfahrten hier: Name und Nummer der Haltestelle
+      text_kopieren(s->name[0], NAMELEN, dict_find(it, MESSAGE_KEY_HIER_NAME));
+      text_kopieren(s->klar[0], NAMELEN, dict_find(it, MESSAGE_KEY_HIER_KLAR));
+      Tuple *x;
+      if ((x = dict_find(it, MESSAGE_KEY_HIER_NR))) s_hier_nr = x->value->int32;
+      if ((x = dict_find(it, MESSAGE_KEY_HIER_N))) s_hier_n = x->value->int32;
+      s_lauf_off = 0;
+      lauf_starten();
+    }
     for (int j = 0; j < MAXD; j++) {
       Tuple *x;
-      if ((x = dict_find(it, MESSAGE_KEY_HIN + j))) s->dep[0][j] = x->value->int32;
-      if ((x = dict_find(it, MESSAGE_KEY_RUECK + j))) s->dep[1][j] = x->value->int32;
-      text_kopieren(s->lin[0][j], LINLEN, dict_find(it, MESSAGE_KEY_HIN_L + j));
-      text_kopieren(s->lin[1][j], LINLEN, dict_find(it, MESSAGE_KEY_RUECK_L + j));
-      if ((x = dict_find(it, MESSAGE_KEY_HIN_D + j))) s->del[0][j] = x->value->int32;
-      if ((x = dict_find(it, MESSAGE_KEY_RUECK_D + j))) s->del[1][j] = x->value->int32;
-      if ((x = dict_find(it, MESSAGE_KEY_HIN_F + j))) s->dur[0][j] = x->value->int32;
-      if ((x = dict_find(it, MESSAGE_KEY_RUECK_F + j))) s->dur[1][j] = x->value->int32;
-      text_kopieren(s->steig[0][j], STEIGLEN, dict_find(it, MESSAGE_KEY_HIN_S + j));
-      text_kopieren(s->steig[1][j], STEIGLEN, dict_find(it, MESSAGE_KEY_RUECK_S + j));
+      if ((x = dict_find(it, MESSAGE_KEY_AB + j))) s->dep[j] = x->value->int32;
+      text_kopieren(s->lin[j], LINLEN, dict_find(it, MESSAGE_KEY_AB_L + j));
+      if ((x = dict_find(it, MESSAGE_KEY_AB_D + j))) s->del[j] = x->value->int32;
+      if ((x = dict_find(it, MESSAGE_KEY_AB_F + j))) s->dur[j] = x->value->int32;
+      text_kopieren(s->steig[j], STEIGLEN, dict_find(it, MESSAGE_KEY_AB_S + j));
+      text_kopieren(s->end[j], NAMELEN, dict_find(it, MESSAGE_KEY_AB_Z + j));
+      text_kopieren(s->endk[j], NAMELEN, dict_find(it, MESSAGE_KEY_AB_ZK + j));
     }
     if ((t = dict_find(it, MESSAGE_KEY_STAND))) s->stand = t->value->int32;
     text_kopieren(s->quelle, sizeof(s->quelle), dict_find(it, MESSAGE_KEY_QUELLE));
     if ((t = dict_find(it, MESSAGE_KEY_STATUS))) s->status = (int)t->value->int32;
-    if (i == s_seite && s_timeout) { app_timer_cancel(s_timeout); s_timeout = NULL; }
+    if (s == aktuelle() && s_timeout) { app_timer_cancel(s_timeout); s_timeout = NULL; }
   }
   layer_mark_dirty(s_layer);
 }
 
 static void blaettern(int d) {
+  s_beruehrt = true;
+  if (s_hier) {                                        // Abfahrten hier: nächstnähere bzw. vorige Haltestelle
+    s_hier_nr += d;
+    if (s_hier_n > 0) s_hier_nr = (s_hier_nr + s_hier_n) % s_hier_n;
+    memset(s_str[HIER].dep, 0, sizeof(s_str[HIER].dep));
+    strcpy(s_str[HIER].name[0], "...");
+    strcpy(s_str[HIER].klar[0], "...");
+    s_lauf_off = 0;
+    hier_anfordern();
+    return;
+  }
   if (s_anzahl < 2) return;
   s_seite = (s_seite + d + s_anzahl) % s_anzahl;
   s_lauf_off = 0;
@@ -1286,10 +1376,14 @@ static void blaettern(int d) {
 }
 
 static void select_click(ClickRecognizerRef r, void *ctx) {
+  s_beruehrt = true;
   if (s_modus == M_ANZEIGE) { lauf_starten(); anfordern(); }
   else if (s_modus == M_LISTE) liste_waehlen();
 }
-static void select_lang(ClickRecognizerRef r, void *ctx) { if (s_modus == M_ANZEIGE) menue_zeigen(); }
+static void select_lang(ClickRecognizerRef r, void *ctx) {
+  s_beruehrt = true;
+  if (s_modus == M_ANZEIGE) { s_hier = false; menue_zeigen(); }   // Menü bezieht sich auf die gespeicherten Seiten
+}
 static void hoch_runter(ClickRecognizerRef r, int d) {
   if (s_modus == M_LISTE) liste_bewegen(d);            // in Listen mit Wiederholung beim Halten
   else if (s_modus == M_ANZEIGE && !click_recognizer_is_repeating(r)) blaettern(d);

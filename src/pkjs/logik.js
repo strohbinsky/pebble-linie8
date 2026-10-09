@@ -543,7 +543,22 @@ function Logik(holenRoh, schrift) {
     });
   }
 
+  // Startseite nach Standort (seit 0.50): die Seite mit dem nächsten Start. Liegen mehrere Starts gleich nah
+  // (bis `gleich` Meter Unterschied, z. B. dieselbe Haltestelle), bleibt die aktive Seite, wenn sie dazugehört,
+  // sonst gewinnt die zuletzt angesehene (Feld `zuletzt`, Unix-Sekunden). Ohne Koordinaten: aktive Seite.
+  function seiteNachOrt(seiten, pos, aktiv, gleich) {
+    var d = seiten.map(function (s) { return s.a && s.a.lat !== undefined ? entfernung(pos.lat, pos.lon, s.a.lat, s.a.lon) : Infinity; });
+    var best = Math.min.apply(null, d.concat([Infinity]));
+    if (best === Infinity) return aktiv;
+    var kand = [];
+    d.forEach(function (m, i) { if (m <= best + gleich) kand.push(i); });
+    if (kand.indexOf(aktiv) >= 0) return aktiv;
+    kand.sort(function (x, y) { return (seiten[y].zuletzt || 0) - (seiten[x].zuletzt || 0) || x - y; });
+    return kand[0];
+  }
+
   return {
+    seiteNachOrt: seiteNachOrt,
     COLS: COLS, UMKREIS_B: UMKREIS_B, GENAU_R: GENAU_R, UMKREISE: UMKREISE, schneller: schneller, standortNah: standortNah, gehSek: gehSek,
     sortDe: sortDe, entfernung: entfernung, ledText: ledText, breite: breite, stadtVon: stadtVon, kurzname: kurzname,
     klarname: klarname, utf8Kuerzen: utf8Kuerzen, oepnv: oepnv,
