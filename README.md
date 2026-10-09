@@ -21,13 +21,13 @@ code, tests and documentation by Claude in pair-programming sessions.
 > published earlier as 3.2.0 to 3.4.0 are the same line of development (now 0.32 to 0.34).
 
 <p>
-  <img src="docs/images/display-led.png" width="200" alt="LED view">
+  <img src="docs/images/display-led-042.png" width="200" alt="LED view">
   &nbsp;
-  <img src="docs/images/display-klar.png" width="200" alt="Klar view">
+  <img src="docs/images/display-klar-042.png" width="200" alt="Klar view">
   &nbsp;
-  <img src="docs/images/display-phosphor.png" width="200" alt="Phosphor view">
+  <img src="docs/images/display-phosphor-042.png" width="200" alt="Phosphor view">
   &nbsp;
-  <img src="docs/images/display-invers.png" width="200" alt="LED inverted view">
+  <img src="docs/images/display-invers-042.png" width="200" alt="LED inverted view">
 </p>
 
 *Left: the default **LED view**, styled like a dot-matrix display at a bus stop — white dots on black for maximum
@@ -90,14 +90,15 @@ departure are the number to go by**.*
 | Back | quit | one step back |
 
 <p>
-  <img src="docs/images/menu-led.png" width="200" alt="Menu, LED view">
-  <img src="docs/images/menu-klar.png" width="200" alt="Menu, Klar view">
-  <img src="docs/images/menu-phosphor.png" width="200" alt="Menu, Phosphor view">
-  <img src="docs/images/change-klar.png" width="200" alt="Change route">
-  <img src="docs/images/return-stops-klar.png" width="200" alt="Return stops near the destination">
+  <img src="docs/images/menu-led-042.png" width="200" alt="Menu, LED view">
+  <img src="docs/images/menu-klar-042.png" width="200" alt="Menu, Klar view">
+  <img src="docs/images/menu-phosphor-042.png" width="200" alt="Menu, Phosphor view">
+  <img src="docs/images/menu-invers-042.png" width="200" alt="Menu, LED inverted view">
+  <img src="docs/images/change-klar-042.png" width="200" alt="Change route">
+  <img src="docs/images/return-stops-klar-042.png" width="200" alt="Return stops near the destination">
 </p>
 
-*Menu in both views, "change route", and the list of return stops within 2 km of the destination
+*Menu in all four views, "change route", and the list of return stops within 2 km of the destination
 (only stops with a direct connection back to the start).*
 
 ### New route on the watch
@@ -138,11 +139,11 @@ location is unknown or far away (planning ahead), the app assumes you stand at t
 Transitous (timetable only); your usual bus from the chosen source, with real-time data from RMV.
 
 <p>
-  <img src="docs/images/faster-direction.png" width="200" alt="Direction">
-  <img src="docs/images/faster-alighting.png" width="200" alt="Get off at">
-  <img src="docs/images/faster-trips.png" width="200" alt="Trips">
-  <img src="docs/images/faster-adopt.png" width="200" alt="Mini menu">
-  <img src="docs/images/faster-adopted.png" width="200" alt="Adopted">
+  <img src="docs/images/faster-direction-042.png" width="200" alt="Direction">
+  <img src="docs/images/faster-alighting-042.png" width="200" alt="Get off at">
+  <img src="docs/images/faster-trips-042.png" width="200" alt="Trips">
+  <img src="docs/images/faster-adopt-042.png" width="200" alt="Mini menu">
+  <img src="docs/images/faster-adopted-042.png" width="200" alt="Adopted">
 </p>
 
 *Example route Hbf ↔ Kurhaus/Theater in the emulator: return from Kurhaus — line 1 at 10:39 arrives before the
@@ -170,14 +171,15 @@ Select; the others open a list.
 | `QUELLE` (source) | Auto · nur RMV · nur Transitous | Auto |
 | `UMKREIS` (radius, see above) | 500 m · 1 km · 2 km | 1 km |
 
-<p><img src="docs/images/settings-led.png" width="200" alt="Settings, LED view"></p>
+<p><img src="docs/images/settings-led-042.png" width="200" alt="Settings, LED view"></p>
 
 Switching the view:
 
 <p>
-  <img src="docs/images/view-led.png" width="200" alt="View selection, LED">
-  <img src="docs/images/view-klar.png" width="200" alt="View selection, Klar">
-  <img src="docs/images/view-phosphor.png" width="200" alt="View selection, Phosphor">
+  <img src="docs/images/view-led-042.png" width="200" alt="View selection, LED">
+  <img src="docs/images/view-klar-042.png" width="200" alt="View selection, Klar">
+  <img src="docs/images/view-phosphor-042.png" width="200" alt="View selection, Phosphor">
+  <img src="docs/images/view-invers-042.png" width="200" alt="View selection, LED inverted">
 </p>
 
 The watch remembers the view itself, so it starts in the right one even before the phone answers.
