@@ -43,6 +43,7 @@ F35 = {  # kleine Schrift 3x5: Haltestellen, Statuszeile
  "/":["..#","..#",".#.","#..","#.."], "(":[".#","#.","#.","#.",".#"], ")":["#.",".#",".#",".#","#."],
  "&":[".#..","#.#.",".#..","#.#.",".#.#"], ",":[".",".",".","#","#"], "'":["#","#",".",".","."],
  "+":["...",".#.","###",".#.","..."], "?":["##.","..#",".#.","...",".#."], ">":["#..",".#.","..#",".#.","#.."],  # Ziel unter der Haltestelle (0.50)
+ "_":["...","...","...","...","###"], "<":["..#",".#.","#..",".#.","..#"],  # Buchstabenrad: Leerzeichen, Pfeil (0.6.1)
 
 }
 
@@ -64,8 +65,10 @@ for t, f, s in [("88:88", F57, 2), ("8  88:88", F57, 1), ("PL DER DT EINHEIT", F
                 # Uhr-Menü (Version 0.30): Titel und feste Einträge, Text ab x=2 bis 63
                 ("ZURUECK AB ZIEL?", F35, 1), ("FAHRT 8 AENDERN", F35, 1), ("FAHRT 8 LOESCHEN", F35, 1),
                 ("RUECKFAHRT AB", F35, 1), ("OHNE RUECKFAHRT", F35, 1), ("NICHTS GEFUNDEN", F35, 1),
-                ("KEIN STANDORT", F35, 1), ("KEINE ANTWORT", F35, 1), ("FAHRTEN 120/120", F35, 1), ("SUCHE 20/20", F35, 1)]:
-    assert breite(t, f, s) <= 62, (t, breite(t, f, s))
+                ("KEIN STANDORT", F35, 1), ("KEINE ANTWORT", F35, 1), ("FAHRTEN 120/120", F35, 1), ("SUCHE 20/20", F35, 1),
+                # 0.6.1: Rubriken, Strecken, Favoriten
+                ("HALTESTELLEN", F35, 1), ("VON HIER NACH", F35, 1), ("NEUE HALTESTELLE", F35, 1), ("FAVORIT NEU 9/10", F35, 1), ("VOLL 10/10", F35, 1), ("UMSTIEGSZEIT: 10'", F35, 1)]:
+    assert breite(t, f, s) <= 63, (t, breite(t, f, s))   # Menüzeile ab x=3 bis zur letzten Spalte 65 (seit 0.6.1)
 assert breite("8  88:88", F57) + breite("99'", F57) + 3 <= 66
 
 kopf = ("// Automatisch erzeugt von tools/schrift_erzeugen.py — nicht von Hand ändern.\n"

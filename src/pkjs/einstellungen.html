@@ -12,6 +12,9 @@
   h3 { font-size: 13px; color: #ccc; margin: 14px 0 6px; font-weight: normal; }
   .hinweis { font-size: 14px; color: #FFAA00; margin: 8px 0; }
   .fehler { font-size: 14px; color: #f66; margin: 8px 0; }
+  ul.menue li { padding: 14px 10px; font-size: 17px; }
+  ul.menue .pfeil { float: right; color: #FFAA00; font-size: 22px; line-height: 18px; }
+  select { width: 100%; box-sizing: border-box; padding: 11px; font-size: 16px; border: 1px solid #444; border-radius: 8px; background: #222; color: #fff; }
   input[type=text] { width: 100%; box-sizing: border-box; padding: 12px; font-size: 17px; border: 1px solid #444; border-radius: 8px; background: #222; color: #fff; }
   button { padding: 11px 15px; font-size: 15px; border: 0; border-radius: 8px; background: #333; color: #fff; margin: 8px 6px 0 0; }
   button.haupt { background: #FFAA00; color: #000; font-weight: bold; }
@@ -27,19 +30,21 @@
   .gewaehlt b { color: #FFAA00; }
   label.zeile { display: block; padding: 9px 0; border-bottom: 1px solid #2a2a2a; }
   label.zeile input { transform: scale(1.3); margin-right: 10px; }
-  canvas { display: block; margin: 8px 0 2px; background: #000; border-radius: 4px; max-width: 100%; }
   .fortschritt { height: 6px; background: #333; border-radius: 3px; overflow: hidden; margin: 8px 0; }
+  #leiste { position: sticky; top: 0; z-index: 5; background: #2a2000; margin: -16px -16px 12px; padding: 4px 16px 10px; border-bottom: 1px solid #FFAA00; }
+  #leiste button { margin-right: 10px; }
   .fortschritt div { height: 100%; background: #FFAA00; width: 0; }
 </style>
 </head>
 <body>
+<div id="leiste" style="display:none"></div>
 <div id="app"></div>
 
 <script>
 /*LOGIK*/
 var ZUSTAND = /*ZUSTAND*/null;   // wird vom Handy-Skript beim Öffnen eingesetzt
 var API = 'https://api.transitous.org/api/';
-var MAXS = 8, COLS = 66;
+var MAXS = 8;
 var SCHRIFT = (ZUSTAND && ZUSTAND.schrift) || {};
 var L = Logik(holen, SCHRIFT);    // gemeinsame Logik mit dem Uhr-Menü (src/pkjs/logik.js)
 var sortDe = L.sortDe, entfernung = L.entfernung, ledText = L.ledText, breite = L.breite, stadtVon = L.stadtVon,
@@ -50,11 +55,29 @@ var ansicht = 'liste';             // 'liste' oder 'editor'
 var e = null;                      // Entwurf der Seite im Editor
 var rmvKey = (ZUSTAND && ZUSTAND.rmvKey) || '';
 var rmvTest = '';
-var layout = ['klar', 'phosphor', 'invers'].indexOf(ZUSTAND && ZUSTAND.layout) >= 0 ? ZUSTAND.layout : 'led';   // Ansicht auf der Uhr
+var dbId = (ZUSTAND && ZUSTAND.dbId) || '', dbKey = (ZUSTAND && ZUSTAND.dbKey) || '', dbTest = '';   // DB Timetables (0.9.0)
+var layout = ['klar', 'phosphor', 'phosphor_weiss', 'papier'].indexOf(ZUSTAND && ZUSTAND.layout) >= 0 ? ZUSTAND.layout : 'klar';   // Ansicht auf der Uhr
+var inversWert = !!(ZUSTAND && ZUSTAND.invers), kontrastWert = !!(ZUSTAND && ZUSTAND.kontrast);   // Farben (0.9.1)
+var schliessenWert = !!(ZUSTAND && ZUSTAND.schliessen);   // App nach 10 s ohne Taste zu (0.9.2, Standard aus)
 var umkreisWert = L.UMKREISE.indexOf(ZUSTAND && ZUSTAND.umkreis) >= 0 ? ZUSTAND.umkreis : 1000;   // Umkreis um den Start
 var abfahrtWert = (ZUSTAND && ZUSTAND.abfahrt) === 'aktuell' ? 'aktuell' : 'plan';   // Abfahrtszeit auf der Uhr
 var dauerWert = (ZUSTAND && ZUSTAND.dauer) === 'aus' ? 'aus' : 'an';                // Fahrtdauer auf der Uhr
 var quelleWert = ['rmv', 'trans'].indexOf(ZUSTAND && ZUSTAND.quelle) >= 0 ? ZUSTAND.quelle : 'auto';   // Quelle der Abfahrten
+// Seit 0.6.1: Strecken (von Standort oder Favorit zu einem Favoriten), Favoriten (seit 0.8.0 bis 20), Verbindungssuche
+var MAXR = 8, MAXF = 20;
+var ersetzen = null;               // Voll (0.8.0): { art: 'seite' | 'strecke' | 'favorit', neu, hin, liste: [{ t, i }] }
+function favReihe() {              // Favoriten nach Häufigkeit wie auf der Uhr (Index ins Feld)
+  return favoriten.map(function (f, i) { return i; }).sort(function (a, b) {
+    return (favoriten[b].n || 0) - (favoriten[a].n || 0) || sortDe(favoriten[a].klar || '', favoriten[b].klar || '');
+  });
+}
+var routen = (ZUSTAND && ZUSTAND.routen) ? ZUSTAND.routen.slice() : [];
+var favoriten = (ZUSTAND && ZUSTAND.favoriten) ? ZUSTAND.favoriten.slice() : [];
+var umstiegeWert = [0, 1, 2, 3, 9].indexOf(ZUSTAND && ZUSTAND.umstiege) >= 0 ? ZUSTAND.umstiege : 2;
+var fusswegWert = [5, 10, 15, 20].indexOf(ZUSTAND && ZUSTAND.fussweg) >= 0 ? ZUSTAND.fussweg : 15;
+var umstzeitWert = [2, 5, 10].indexOf(ZUSTAND && ZUSTAND.umstzeit) >= 0 ? ZUSTAND.umstzeit : 2;
+var r = null;                      // Entwurf einer Strecke { von (Index Favorit, -1 = Standort), nach (Index) }
+var favSuche = { text: '', treffer: [], fehler: null };
 function kmText(m) { return m >= 1000 ? (m / 1000) + ' km' : m + ' m'; }
 
 // ---------- Hilfsfunktionen ----------
@@ -72,57 +95,100 @@ function holen(pfad, fertig) {
   x.send();
 }
 
-// ---------- LED-Vorschau (Breite und Kurzname stehen in logik.js) ----------
-var lauf = 0;                      // Lauftext-Versatz der Vorschau, wie auf der Uhr
-function vorschau(canvas, text) {
-  var P = 6, c = canvas.getContext('2d');
-  canvas.width = COLS * P; canvas.height = 7 * P;
-  c.fillStyle = '#000'; c.fillRect(0, 0, canvas.width, canvas.height);
-  var an = {}, w = breite(text), periode = w + 16;
-  function setzen(x) {
-    for (var i = 0; i < text.length; i++) {
-      var g = SCHRIFT[text[i]];
-      if (!g) { x += 3; continue; }
-      for (var gy = 0; gy < g.length; gy++)
-        for (var gx = 0; gx < g[gy].length; gx++)
-          if (g[gy][gx] === '#') an[(x + gx) + ',' + (gy + 1)] = 1;
-      x += g[0].length + 1;
-    }
-  }
-  if (w <= COLS - 2) setzen(Math.floor((COLS - w) / 2));
-  else { var x0 = 1 - (lauf % periode); setzen(x0); setzen(x0 + periode); }
-  for (var y = 0; y < 7; y++)
-    for (var k = 0; k < COLS; k++) {
-      if (an[k + ',' + y]) { c.fillStyle = '#FFFFFF'; c.fillRect(k * P, y * P, P - 2, P - 2); }
-      else { c.fillStyle = '#555555'; c.fillRect(k * P, y * P, 2, 2); }
-    }
+// ---------- Hauptmenü und Unterseiten (seit 0.6.4) ----------
+// Eine Konfigurationsseite kann Daten nur beim Schließen übergeben. 0.6.4–0.8.0 schloss sie sich nach jeder Änderung und
+// sollte sich wieder öffnen — das lässt die Pebble-App nicht zu (Seb 2026-10-10: man landet im Pebble-Menü). Seit 0.8.1:
+// Änderungen werden vorgemerkt, die Leiste oben zeigt „Speichern“. Android-Zurück geht eine Ebene hoch und speichert
+// ganz oben; geht die Seite in den Hintergrund, wird ebenfalls gespeichert (beides nur, wenn die Pebble-App es weitergibt).
+var unterseite = (ZUSTAND && ZUSTAND.unterseite) || '';
+var UNTERSEITEN = [['haltestellen', 'Abfahrten'], ['strecken', 'Strecken'], ['favoriten', 'Favoriten'],
+                   ['anzeige', 'Anzeige auf der Uhr'], ['suche', 'Verbindungssuche'], ['daten', 'Datenquelle und Umkreis']];
+function daten() {
+  return { strecken: strecken, rmvKey: rmvKey, dbId: dbId, dbKey: dbKey, layout: layout, invers: inversWert, kontrast: kontrastWert, schliessen: schliessenWert, umkreis: umkreisWert, quelle: quelleWert, abfahrt: abfahrtWert, dauer: dauerWert,
+           routen: routen, favoriten: favoriten, umstiege: umstiegeWert, fussweg: fusswegWert, umstzeit: umstzeitWert };
 }
-
-// ---------- Ansicht: Liste der Seiten ----------
+var geaendert = false;
+function vormerken() { geaendert = true; leisteZeigen(); }
+function leisteZeigen() {
+  var l = $('leiste');
+  if (!l) return;
+  l.style.display = geaendert ? 'block' : 'none';
+  l.innerHTML = '<button class="haupt" data-a="speichern">Speichern</button><span class="klein">Nicht gespeichert — schickt alles an die Uhr und schließt</span>';
+}
+function namenFokus(i) {                 // neuer Favorit: gleich den Namen eintippen können
+  var inp = document.querySelector && document.querySelector('[data-fname="' + i + '"]');
+  if (!inp) return;
+  if (inp.scrollIntoView) inp.scrollIntoView({ block: 'center' });
+  inp.focus(); inp.select();
+}
+function hauptHtml() {
+  var kurz = {
+    haltestellen: strecken.length + ' von ' + MAXS, strecken: routen.length + ' von ' + MAXR, favoriten: favoriten.length + ' von ' + MAXF,
+    anzeige: { klar: 'Klar', phosphor: 'Phosphor grün', phosphor_weiss: 'Phosphor weiß', papier: 'Papier' }[layout] + (inversWert ? ', invertiert' : '') + (kontrastWert ? ', hoher Kontrast' : '') + (schliessenWert ? ', schließt nach 10 s' : '') + (abfahrtWert === 'aktuell' ? ', Zeit aktuell' : ''),
+    suche: (umstiegeWert === 9 ? 'Umstiege beliebig' : 'höchstens ' + umstiegeWert + ' Umstiege') + ', ' + fusswegWert + ' min Fußweg',
+    daten: { auto: 'Auto', rmv: 'nur RMV', trans: 'nur Transitous' }[quelleWert] + (rmvKey ? ' mit RMV-Schlüssel' : ' ohne RMV-Schlüssel') + (dbId && dbKey ? ', DB für Züge' : '') + ', Umkreis ' + kmText(umkreisWert)
+  };
+  return '<h1>Linie 8</h1><div class="klein">Änderungen gehen erst mit <b>Speichern</b> (oben) an die Uhr. ' +
+    'Auf der Uhr wechselt Hoch/Runter lang zwischen <b>Abfahrten</b> und <b>Strecken</b>.</div><ul class="menue">' +
+    UNTERSEITEN.map(function (u) {
+      return '<li data-a="geh" data-s="' + u[0] + '"><b>' + u[1] + '</b><span class="pfeil">›</span><br><span class="klein">' + esc(kurz[u[0]]) + '</span></li>';
+    }).join('') + '</ul><button data-a="speichern">' + (geaendert ? 'Speichern und schließen' : 'Schließen') + '</button>';
+}
 function zeigeListe() {
   ansicht = 'liste';
-  var h = '<h1>Linie 8 · Seiten</h1><div class="klein">Bis zu ' + MAXS + ' Seiten, auf der Uhr mit hoch/runter blättern. ' +
-    'Eine Seite zeigt die Abfahrten ab einer Haltestelle — mit Ziel samt Fahrtdauer, ohne Ziel mit dem Endziel jeder Fahrt. ' +
-    'Die Rückfahrt legst du an der Uhr an: Select lang → Rückfahrt. Beim Öffnen springt die Uhr auf die Seite mit dem nächsten Start.</div><h2>Seiten</h2>';
-  if (!strecken.length) h += '<div class="klein">Noch keine Seite eingerichtet.</div>';
+  var titel = (UNTERSEITEN.filter(function (u) { return u[0] === unterseite; })[0] || [])[1];
+  var inhalt = { haltestellen: haltestellenHtml, strecken: routenHtml, favoriten: favoritenHtml, anzeige: anzeigeHtml, suche: suchHtml, daten: datenHtml }[unterseite];
+  if (ersetzen) { $('app').innerHTML = ersetzenHtml(); return; }
+  $('app').innerHTML = inhalt ? '<button class="klein" data-a="uebersicht">‹ Übersicht</button><h1>' + titel + '</h1>' + inhalt() : hauptHtml();
+  if ($('rmvKey')) { $('rmvKey').oninput = function () { rmvKey = this.value.trim(); vormerken(); }; $('rmvKey').onchange = vormerken; }
+  if ($('dbId')) { $('dbId').oninput = function () { dbId = this.value.trim(); vormerken(); }; $('dbId').onchange = vormerken; }
+  if ($('dbKey')) { $('dbKey').oninput = function () { dbKey = this.value.trim(); vormerken(); }; $('dbKey').onchange = vormerken; }
+  listeVerdrahten();
+  leisteZeigen();
+}
+// Voll (0.8.0): erst beim Anlegen fragen, was ersetzt wird; die gewählte fällt weg, die neue kommt an ihren Platz
+function ersetzenHtml() {
+  return '<h1>Voll: welche ersetzen?</h1><div class="klein">Die gewählte fällt weg, die neue kommt ans Ende' +
+    (ersetzen.art === 'favorit' ? '. Selten genutzte stehen oben.' : ' (eine Rückfahrt hinter ihre Hinfahrt).') + '</div><ul class="menue">' +
+    ersetzen.liste.map(function (x, k) { return '<li data-a="ersetzen" data-i="' + k + '">' + esc(x.t) + '</li>'; }).join('') +
+    '</ul><button data-a="ersetzenweg">Abbrechen</button>';
+}
+function seitenName(s) { return s.a.kurz + (s.b ? ' → ' + s.b.kurz : ''); }
+function routenName(x) { return (x.von ? x.von.klar : 'Hier') + ' → ' + x.nach.klar; }
+function alleLoeschenKnopf(art, n) { return n ? '<button class="klein" data-a="alle" data-s="' + art + '">Alle ' + n + ' löschen</button>' : ''; }
+function haltestellenHtml() {
+  var h = '<div class="klein"><b>Du weißt, wie du fährst. Die App sagt dir, wann.</b> ' +
+    'Abfahrten ab einer Haltestelle, ohne Umstieg — mit Ausstieg samt Ankunft und Fahrtdauer, ohne Ausstieg mit dem Endziel jeder Fahrt. ' +
+    'Die Rückfahrt legst du an der Uhr an: Select lang → Rückfahrt.</div>';
+  if (!strecken.length) h += '<div class="klein">Noch keine Abfahrt angelegt.</div>';
   strecken.forEach(function (s, i) {
     h += '<div class="karte"><b>' + esc(s.a.kurz) + (s.b ? ' → ' + esc(s.b.kurz) : '') + '</b><br>' +
-      '<span class="klein">ab ' + esc(s.a.name) + (s.b ? '<br>nach ' + esc(s.b.name) : '<br>ohne Ziel: alle Abfahrten mit Endziel') + '</span><br>' +
+      '<span class="klein">ab ' + esc(s.a.name) + (s.b ? '<br>Ausstieg ' + esc(s.b.name) : '<br>ohne Ausstieg: alle Abfahrten mit Endziel') + '</span><br>' +
       (s.alle ? '<span class="klein">alle Linien </span>' : '') +
       s.linien.map(function (l) { return '<span class="marke">' + esc(l) + '</span>'; }).join('') + '<br>' +
       '<button class="klein" data-a="hoch" data-i="' + i + '"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
       '<button class="klein" data-a="runter" data-i="' + i + '"' + (i === strecken.length - 1 ? ' disabled' : '') + '>▼</button>' +
-      '<button class="klein" data-a="bearbeiten" data-i="' + i + '">Bearbeiten</button>' +
+      '<button class="klein" data-a="bearbeiten" data-i="' + i + '">Ändern</button>' +
       '<button class="klein" data-a="loeschen" data-i="' + i + '">Löschen</button></div>';
   });
-  if (strecken.length < MAXS) h += '<button data-a="neu">+ Seite hinzufügen</button>';
-  // Reihenfolge wie im Uhr-Menü Einstellungen: Anzeige, Datenquelle, Rückfahrt-Suche
-  h += '<h2>Anzeige auf der Uhr</h2><h3>Ansicht</h3>' +
-    [['led', 'LED-Haltestellenanzeige', 'Standard. Weiße Punkte auf Schwarz, maximaler Kontrast'],
-     ['invers', 'LED invers', 'Schwarze Punkte auf Weiß, für helles Tageslicht'],
-     ['klar', 'Klar', 'Weiß, Systemschrift, Linie als rotes Kästchen, Namen mit Umlauten'],
-     ['phosphor', 'Phosphor', 'Radar-Grün auf Schwarz, Pixelschrift wie das Watchface Phosphor']].map(function (v) {
+  h += '<button data-a="neu">+ Neu anlegen</button>' + alleLoeschenKnopf('haltestellen', strecken.length);
+  if (strecken.length >= MAXS) h += '<div class="klein">Voll (' + MAXS + '): beim Anlegen wählst du, welche ersetzt wird.</div>';
+  return h;
+}
+function anzeigeHtml() {
+  return '<h3>Ansicht</h3>' +
+    [['klar', 'Klar', 'Standard. Schwarz auf Weiß, Systemschrift, Linie als rotes Kästchen, Namen mit Umlauten'],
+     ['phosphor', 'Phosphor grün', 'Radar-Grün auf Schwarz, Pixelschrift wie das Watchface Phosphor'],
+     ['phosphor_weiss', 'Phosphor weiß', 'Pixelschrift wie Phosphor, aber weiß'],
+     ['papier', 'Papier', 'Wie Klar, alles fett, kein Grau, große Ziffern — am besten lesbar']].map(function (v) {
       return '<label class="zeile"><input type="radio" name="layout" data-a="layout" value="' + v[0] + '"' + (layout === v[0] ? ' checked' : '') + '>' +
+        '<b>' + v[1] + '</b><br><span class="klein">' + v[2] + '</span></label>';
+    }).join('') +
+    '<h3>Farben</h3>' +
+    [['invers', 'Invertiert', 'Dunkle Schrift auf hellem Grund, bei Tageslicht am kontrastreichsten. Klar wird weiß auf Schwarz', inversWert],
+     ['kontrast', 'Hoher Kontrast', 'Keine graue oder blasse Schrift, alles in voller Schriftfarbe. Farbige Hinweise bleiben', kontrastWert],
+     ['schliessen', 'App nach 10 s schließen', 'Ohne Tastendruck zurück zum Watchface (nicht beim Laden und in der aktiven Fahrt). Aus: Linie 8 bleibt offen', schliessenWert]].map(function (v) {
+      return '<label class="zeile"><input type="checkbox" data-a="' + v[0] + '"' + (v[3] ? ' checked' : '') + '>' +
         '<b>' + v[1] + '</b><br><span class="klein">' + v[2] + '</span></label>';
     }).join('') +
     '<h3>Abfahrtszeit</h3>' +
@@ -133,9 +199,11 @@ function zeigeListe() {
     }).join('') +
     '<h3>Fahrtdauer</h3>' +
     '<label class="zeile"><input type="checkbox" data-a="dauerWert"' + (dauerWert === 'an' ? ' checked' : '') + '>' +
-    '<b>Fahrtdauer zum Ziel zeigen</b><br><span class="klein">Standard an. Minuten je Abfahrt, gedimmt; entfällt ohnehin, wenn kein Platz ist</span></label>' +
-    '<div class="klein">Alles auch an der Uhr: Select lang → Einstellungen.</div>';
-  h += '<h2>Datenquelle</h2><div class="klein">Optional: eigener RMV-Schlüssel (accessId, kostenlos bei RMV Open Data). ' +
+    '<b>Fahrtdauer bis zum Ausstieg zeigen</b><br><span class="klein">Standard an. Minuten je Abfahrt, gedimmt; entfällt ohnehin, wenn kein Platz ist</span></label>' +
+    '<div class="klein">Alles auch an der Uhr: Select lang → Einstellungen → Anzeige.</div>';
+}
+function datenHtml() {
+  return '<h3>Datenquelle</h3><div class="klein">Optional: eigener RMV-Schlüssel (accessId, kostenlos bei RMV Open Data). ' +
     'Mit Schlüssel kommen die Abfahrten vom RMV, mit Echtzeit; klappt das nicht, von Transitous (nur Fahrplan). ' +
     'Auf der Uhr steht unten RMV oder TRANS vor der Uhrzeit.</div>' +
     '<input type="text" id="rmvKey" placeholder="RMV-Schlüssel (leer = nur Transitous)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" value="' + esc(rmvKey) + '">' +
@@ -145,19 +213,148 @@ function zeigeListe() {
      ['trans', 'Nur Transitous', 'nur Fahrplan, schont das RMV-Kontingent']].map(function (v) {
       return '<label class="zeile"><input type="radio" name="quelle" data-a="quelleWert" value="' + v[0] + '"' + (quelleWert === v[0] ? ' checked' : '') + '>' +
         '<span><b>' + v[1] + '</b> <span class="klein">' + v[2] + '</span></span></label>';
-    }).join('');
-  h += '<h2>Umkreis</h2><div class="klein">So weit läufst du höchstens: bei der Rückfahrt mit Ankunft im Umkreis um den Start, ' +
-    'bei „Im Umkreis“ als Start und bei „Schnellere Abfahrt“ (alles im Uhr-Menü). Normal endet die Rückfahrt genau am Start.</div>' +
+    }).join('') +
+    '<h3>DB-Echtzeit für Züge</h3><div class="klein">Optional: eigener Zugang zur DB-Schnittstelle „Timetables“ (kostenlos im DB API Marketplace, ' +
+    'Anwendung anlegen und Timetables abonnieren). Dann kommen bei <b>Zügen</b> Zeit, Gleis und Ausfall von der DB — zusätzlich zur Quelle oben, ' +
+    'auch außerhalb des RMV. Bus und Tram bleiben wie oben. Auf der Uhr steht dann RMV+DB bzw. TR+DB.</div>' +
+    '<input type="text" id="dbId" placeholder="DB Client-ID (leer = ohne DB)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" value="' + esc(dbId) + '">' +
+    '<input type="text" id="dbKey" placeholder="DB API-Key (Client Secret)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" value="' + esc(dbKey) + '">' +
+    '<button data-a="dbTest">DB-Zugang prüfen</button><div class="klein" id="dbErg">' + esc(dbTest) + '</div>' +
+    '<h3>Umkreis</h3><div class="klein">So weit läufst du höchstens: bei der Rückfahrt mit Ankunft im Umkreis um den Start, ' +
+    'bei „Alle in der Nähe“ als Haltestelle und für den Vorschlag „früher da“ (nur, wenn du so nah am Start einer Abfahrt oder Strecke stehst). ' +
+    'Normal endet die Rückfahrt genau am Start.</div>' +
     L.UMKREISE.map(function (m) {
       return '<label class="zeile"><input type="radio" name="umkreis" data-a="umkreisWert" value="' + m + '"' + (umkreisWert === m ? ' checked' : '') + '>' +
         '<b>' + kmText(m) + '</b>' + (m === 1000 ? ' <span class="klein">Standard</span>' : '') + '</label>';
     }).join('') +
     '<div class="klein">Auch an der Uhr: Select lang → Einstellungen → Umkreis.</div>';
-  h += '<h2>&nbsp;</h2><button class="haupt" data-a="speichern">Speichern und an die Uhr</button><button data-a="abbrechen">Abbrechen</button>';
-  $('app').innerHTML = h;
-  if ($('rmvKey')) $('rmvKey').oninput = function () { rmvKey = this.value.trim(); };
 }
 
+// ---------- Strecken, Favoriten, Verbindungssuche (0.6.1) ----------
+function ortNeu(name, stadt, lat, lon, typ, id) {        // wie ortNeu im Handy-Skript
+  var st = typ === 'halt' ? stadtVon(name) : '';
+  return { name: name, stadt: stadt || st, kurz: L.utf8Kuerzen(kurzname(name, st), 31), klar: L.utf8Kuerzen(L.klarname(name, st), 31),
+           lat: lat, lon: lon, typ: typ, id: id || null, n: 0 };
+}
+function kopie(o) { return JSON.parse(JSON.stringify(o)); }
+function routenHtml() {
+  var h = '<div class="klein"><b>Du weißt, wohin du willst. Die App sagt dir, wie.</b> ' +
+    'Start ist „Hier“ (dein Standort) oder ein Favorit, Ziel ein Favorit. ' +
+    'Auf der Uhr: die nächsten drei Verbindungen, Select zeigt den Weg mit Umstiegen und Fußwegen. Neue Ziele zuerst unten als Favorit anlegen ' +
+    '— oder an der Uhr: Select lang → Neu anlegen → Suchen.</div>';
+  if (!routen.length) h += '<div class="klein">Noch keine Strecke angelegt.</div>';
+  routen.forEach(function (x, i) {
+    h += '<div class="karte"><b>' + esc(x.von ? x.von.klar : 'Hier') + ' → ' + esc(x.nach.klar) + '</b><br>' +
+      '<span class="klein">nach ' + esc(x.nach.name + (x.nach.stadt && x.nach.name.indexOf(x.nach.stadt) < 0 ? ', ' + x.nach.stadt : '')) + '</span>' +
+      '<div class="klein">Name auf der Uhr</div><input type="text" maxlength="30" data-rname="' + i + '" value="' + esc(x.nach.klar) + '">' +
+      '<button class="klein" data-a="rhoch" data-i="' + i + '"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
+      '<button class="klein" data-a="rrunter" data-i="' + i + '"' + (i === routen.length - 1 ? ' disabled' : '') + '>▼</button>' +
+      (x.von ? '<button class="klein" data-a="rrueck" data-i="' + i + '">Rückfahrt</button>' : '') +
+      '<button class="klein" data-a="rloeschen" data-i="' + i + '">Löschen</button></div>';
+  });
+  if (r) {
+    h += '<div class="karte"><b>Strecke neu anlegen</b><div class="klein">Von</div><select id="rvon"><option value="-1">Hier (mein Standort)</option>' +
+      favReihe().map(function (i) { return '<option value="' + i + '"' + (r.von === i ? ' selected' : '') + '>' + esc(favoriten[i].klar) + '</option>'; }).join('') +
+      '</select><div class="klein">Nach</div><select id="rnach">' +
+      favReihe().map(function (i) { return '<option value="' + i + '"' + (r.nach === i ? ' selected' : '') + '>' + esc(favoriten[i].klar) + '</option>'; }).join('') +
+      '</select><br><button class="haupt" data-a="rok"' + (favoriten.length ? '' : ' disabled') + '>Übernehmen</button><button data-a="rweg">Zurück</button></div>';
+  } else h += '<button data-a="rneu"' + (favoriten.length ? '' : ' disabled') + '>+ Neu anlegen</button>' + alleLoeschenKnopf('strecken', routen.length) +
+    (favoriten.length ? '' : '<div class="klein">Dafür braucht es mindestens einen Favoriten als Ziel.</div>') +
+    (routen.length >= MAXR ? '<div class="klein">Voll (' + MAXR + '): beim Anlegen wählst du, welche ersetzt wird.</div>' : '');
+  return h;
+}
+function favoritenHtml() {
+  var h = '<div class="klein">Bis zu ' + MAXF + ' Adressen oder Haltestellen als Start und Ziel, sortiert nach Häufigkeit (wie auf der Uhr). ' +
+    'Der Name hier steht auf der Uhr; Strecken mit diesem Ort ziehen ihn mit. An der Uhr anlegen: Einstellungen → Favoriten → Favorit neu, ' +
+    'oder auf jeder Seite: Select lang → Favorit: Ort.</div>';
+  favReihe().forEach(function (i) {
+    var f = favoriten[i];
+    h += '<div class="karte"><div class="klein">Name auf der Uhr, z. B. Zuhause</div><input type="text" maxlength="30" data-fname="' + i + '" value="' + esc(f.klar) + '">' +
+      '<span class="klein">' + esc(f.name + (f.stadt && f.name.indexOf(f.stadt) < 0 ? ', ' + f.stadt : '')) + ' · ' + (f.typ === 'halt' ? 'Haltestelle' : 'Adresse') + '</span><br>' +
+      '<button class="klein" data-a="floeschen" data-i="' + i + '">Löschen</button></div>';
+  });
+  h += '<input type="text" id="favSuche" placeholder="Adresse oder Haltestelle suchen" autocomplete="off" value="' + esc(favSuche.text) + '">';
+  if (favSuche.fehler) h += '<div class="fehler">' + esc(favSuche.fehler) + '</div>';
+  h += '<ul>' + favSuche.treffer.map(function (t, i) {
+    return '<li data-a="fneu" data-i="' + i + '">' + esc(t.name) + ' <span class="klein">' + esc(t.stadt || '') + ' · ' + (t.typ === 'halt' ? 'Haltestelle' : 'Adresse') + '</span></li>';
+  }).join('') + '</ul>';
+  h += alleLoeschenKnopf('favoriten', favoriten.length);
+  if (favoriten.length >= MAXF) h += '<div class="klein">Voll (' + MAXF + '): beim Anlegen wählst du, welcher ersetzt wird.</div>';
+  return h;
+}
+function suchHtml() {                    // Verbindungssuche der Strecken, wie an der Uhr: Einstellungen → Strecken
+  function gruppe(name, werte, aktuell, text) {
+    return werte.map(function (v) {
+      return '<label class="zeile"><input type="radio" name="' + name + '" data-a="' + name + '" value="' + v + '"' + (aktuell === v ? ' checked' : '') + '>' + text(v) + '</label>';
+    }).join('');
+  }
+  return '<div class="klein">Gilt für die Strecken.</div><h3>Umstiege höchstens</h3>' +
+    gruppe('umstiegeWert', [0, 1, 2, 3, 9], umstiegeWert, function (v) { return v === 9 ? 'beliebig' : String(v) + (v === 2 ? ' <span class="klein">Standard</span>' : ''); }) +
+    '<h3>Fußweg am Anfang und Ende höchstens</h3>' +
+    gruppe('fusswegWert', [5, 10, 15, 20], fusswegWert, function (v) { return v + ' min' + (v === 15 ? ' <span class="klein">Standard</span>' : ''); }) +
+    '<h3>Umstiegszeit mindestens</h3>' +
+    gruppe('umstzeitWert', [2, 5, 10], umstzeitWert, function (v) { return v + ' min' + (v === 2 ? ' <span class="klein">Standard</span>' : ''); }) +
+    '<div class="klein">Gehtempo fest 4 km/h. Auch an der Uhr: Select lang → Einstellungen → Strecken.</div>';
+}
+var favWartet = null;
+function listeVerdrahten() {
+  var fs = $('favSuche');
+  if (fs) fs.oninput = function () {
+    favSuche.text = this.value;
+    var q = this.value.trim();
+    clearTimeout(favWartet);
+    if (q.length < 3) return;
+    favWartet = setTimeout(function () {
+      var st = ZUSTAND && ZUSTAND.standort;
+      holen('v1/geocode?language=de&numResults=10&text=' + encodeURIComponent(q) + (st ? '&place=' + st.lat + ',' + st.lon + '&placeBias=4' : ''), function (f, d) {
+        favSuche.fehler = f ? 'Suche: ' + f : null;
+        favSuche.treffer = f ? [] : d.map(function (t) {
+          var stadt = ((t.areas || []).filter(function (a) { return a.default; })[0] || {}).name || '';
+          if (t.type === 'STOP') return ortNeu(t.name, stadt, t.lat, t.lon, 'halt', t.id);
+          return ortNeu(t.type === 'ADDRESS' && t.street ? t.street + (t.houseNumber ? ' ' + t.houseNumber : '') : t.name, stadt, t.lat, t.lon, t.type === 'ADDRESS' ? 'adresse' : 'ort');
+        });
+        var pos = $('favSuche') ? $('favSuche').selectionStart : 0;
+        zeigeListe();
+        var el = $('favSuche'); if (el) { el.focus(); el.setSelectionRange(pos, pos); }
+      });
+    }, 350);
+  };
+  function namensFeld(attr, liste, ziel) {   // Name auf der Uhr ändern: Klar wie eingegeben, LED in Großbuchstaben
+    Array.prototype.forEach.call(document.querySelectorAll('[' + attr + ']'), function (inp) {
+      inp.oninput = function () {
+        var o = ziel(liste[parseInt(inp.getAttribute(attr), 10)]), t = inp.value.trim();
+        if (!t) return;
+        o.klar = L.utf8Kuerzen(t, 31); o.kurz = L.utf8Kuerzen(ledText(t), 31);
+        vormerken();
+      };
+      inp.onchange = vormerken;
+    });
+  }
+  namensFeld('data-fname', favoriten, function (o) { return o; });
+  namensFeld('data-rname', routen, function (o) { return o.nach; });
+  if ($('rvon')) $('rvon').onchange = function () { r.von = parseInt(this.value, 10); };
+  if ($('rnach')) $('rnach').onchange = function () { r.nach = parseInt(this.value, 10); };
+}
+
+function dbPruefen() {                   // DB Timetables (0.9.0): Bahnhofssuche als Probe
+  if (!dbId || !dbKey) { dbTest = 'Client-ID und API-Key eintragen — ohne beide bleibt die DB aus.'; return zeigeListe(); }
+  dbTest = 'Prüfe …'; zeigeListe();
+  var x = new XMLHttpRequest();
+  x.open('GET', 'https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1/station/8000105', true);
+  x.setRequestHeader('DB-Client-Id', dbId);
+  x.setRequestHeader('DB-Api-Key', dbKey);
+  x.onload = function () {
+    dbTest = x.status === 200 ? '✓ Zugang funktioniert.' :
+             x.status === 401 ? '✗ Client-ID oder API-Key falsch (HTTP 401).' :
+             x.status === 403 ? '✗ Abgelehnt (HTTP 403) — ist Timetables für diese Anwendung abonniert?' : '✗ DB antwortet mit HTTP ' + x.status + '.';
+    zeigeListe();
+  };
+  x.onerror = function () {
+    dbTest = 'Von dieser Seite aus nicht prüfbar (Browser blockiert oder kein Netz). Speichern geht trotzdem — auf der Uhr steht dann RMV+DB bzw. TR+DB, wenn es klappt.';
+    zeigeListe();
+  };
+  x.send();
+}
 function rmvPruefen() {
   if (!rmvKey) { rmvTest = 'Kein Schlüssel eingetragen — es wird nur Transitous genutzt.'; return zeigeListe(); }
   rmvTest = 'Prüfe …'; zeigeListe();
@@ -190,7 +387,7 @@ function neuerEntwurf(s) {
 
 function zeigeEditor() {
   ansicht = 'editor';
-  var h = '<h1>Seite ' + (e.index === undefined ? 'hinzufügen' : 'bearbeiten') + '</h1>';
+  var h = '<h1>Abfahrt ' + (e.index === undefined ? 'neu anlegen' : 'ändern') + '</h1>';
 
   // 1 Start
   h += '<h2>1 · Haltestelle</h2>';
@@ -205,7 +402,7 @@ function zeigeEditor() {
     if (e.sucheFehler) h += '<div class="fehler">' + esc(e.sucheFehler) + '</div>';
   }
 
-  var ohneLi = '<li data-a="ohneZiel"><b>Ohne Ziel</b> <span class="klein">alle Abfahrten dieser Haltestelle, je Fahrt mit Endziel</span></li>';
+  var ohneLi = '<li data-a="ohneZiel"><b>Ohne Ausstieg</b> <span class="klein">alle Abfahrten dieser Haltestelle, je Fahrt mit Endziel</span></li>';
 
   // 2 Linie
   if (e.a && !e.b && !e.ohne) {
@@ -236,7 +433,8 @@ function zeigeEditor() {
 
   // 3 Ziel
   if (e.a && !e.b && !e.ohne && e.erg && e.wahlLinie && (richt.length <= 1 || e.wahlRichtung !== null)) {
-    h += '<h2>3 · Ziel (optional)</h2><input type="text" id="filterZiel" placeholder="Ziel eingrenzen" autocomplete="off" value="' + esc(e.filter) + '"><ul>' + ohneLi;
+    h += '<h2>3 · Ausstieg (optional)</h2><div class="klein">Eine Haltestelle auf deiner Linie: Die Uhr zeigt dann nur Fahrten, die dort halten, mit Ankunft.</div>' +
+      '<input type="text" id="filterZiel" placeholder="Ausstieg eingrenzen" autocomplete="off" value="' + esc(e.filter) + '"><ul>' + ohneLi;
     var f = e.filter.toLowerCase(), treffer = [];
     var folge = richt.length === 1 ? richt[0] : (richt.length > 1 && e.wahlRichtung >= 0 ? richt[e.wahlRichtung] : null);
     if (folge) folge.ziele.forEach(function (z) {                  // Fahrtreihenfolge, nächster Halt zuerst
@@ -254,7 +452,7 @@ function zeigeEditor() {
     });
     h += '</ul>';
     if (treffer.length > 60) h += '<div class="klein">' + (treffer.length - 60) + ' weitere — oben eingrenzen</div>';
-    if (!treffer.length) h += '<div class="klein">Kein Ziel gefunden.</div>';
+    if (!treffer.length) h += '<div class="klein">Kein Ausstieg gefunden.</div>';
   }
 
   // 3 gewählt (Ziel oder ohne), 4 Linien, 5 Name
@@ -265,23 +463,23 @@ function zeigeEditor() {
     });
     h += '<div class="klein">' + info + '</div>';
     h += '<h2>5 · Anzeige auf der Uhr</h2>' +
-      '<div class="klein">Haltestelle</div><input type="text" id="kurzA" maxlength="30" value="' + esc(e.a.kurz) + '"><canvas id="vA"></canvas><div class="klein" id="hA"></div>';
+      '<div class="klein">Haltestelle</div><input type="text" id="kurzA" maxlength="30" value="' + esc(e.a.kurz) + '"><div class="klein">Lange Namen laufen auf der Uhr als Lauftext durch</div>';
   }
   if (e.ohne) {
-    h += '<h2>3 · Ziel</h2><div class="gewaehlt"><b>Ohne Ziel</b> <span class="klein">alle Abfahrten mit Endziel</span> <button class="klein" data-a="zielNeu">ändern</button></div>';
+    h += '<h2>3 · Ausstieg</h2><div class="gewaehlt"><b>Ohne Ausstieg</b> <span class="klein">alle Abfahrten mit Endziel</span> <button class="klein" data-a="zielNeu">ändern</button></div>';
     h += '<h2>4 · Linien</h2>';
     if (e.lade || !e.erg) h += '<div class="klein">Lade Linien ab ' + esc(e.a.name) + ' …</div>';
     else linienWahl('Alle Linien, die hier abfahren. Ohne Haken: Linie wird nicht angezeigt.');
   }
   if (e.b) {
-    h += '<h2>3 · Ziel</h2><div class="gewaehlt"><b>' + esc(e.b.name) + '</b> <button class="klein" data-a="zielNeu">ändern</button></div>';
+    h += '<h2>3 · Ausstieg</h2><div class="gewaehlt"><b>' + esc(e.b.name) + '</b> <button class="klein" data-a="zielNeu">ändern</button></div>';
     h += '<h2>4 · Linien auf dieser Seite</h2>';
     if (!e.pruef || !e.pruef.fertig) {
       h += '<div class="klein">Prüfe Direktverbindungen …</div>';
     } else if (e.pruef.fehler) {
       h += '<div class="fehler">' + esc(e.pruef.fehler) + '</div><button data-a="pruefen">Nochmal prüfen</button>';
     } else if (!e.pruef.hin.length) {
-      h += '<div class="hinweis">Keine Direktverbindung ab ' + esc(e.a.name) + ' zu diesem Ziel.</div>';
+      h += '<div class="hinweis">Keine Direktverbindung ab ' + esc(e.a.name) + ' zu diesem Ausstieg.</div>';
     } else {
       linienWahl('Geprüft an den nächsten Fahrten ab jetzt.');
     }
@@ -299,23 +497,10 @@ function zeigeEditor() {
   ['A'].forEach(function (k) {
     var inp = $('kurz' + k);
     if (!inp) return;
-    function akt() {
-      var t = ledText(inp.value);
-      e.a.kurz = t;
-      vorschau($('v' + k), t);
-      $('h' + k).textContent = breite(t) > COLS - 2 ? 'zu lang für eine Zeile — läuft auf der Uhr als Lauftext durch' : 'passt in eine Zeile';
-    }
+    function akt() { e.a.kurz = ledText(inp.value); }   // Großbuchstaben-Schreibweise für Phosphor
     inp.oninput = akt; akt();
   });
 }
-
-setInterval(function () {            // Lauftext der Vorschau
-  lauf++;
-  ['A'].forEach(function (k) {
-    var c = $('v' + k), i = $('kurz' + k);
-    if (c && i && breite(ledText(i.value)) > COLS - 2) vorschau(c, ledText(i.value));
-  });
-}, 120);
 
 // ---------- Ablauf im Editor ----------
 var wartet = null;
@@ -426,7 +611,13 @@ function uebernehmen() {
     alle: e.auswahl.length === alleLinien().length
   };
   if (e.zuletzt) s.zuletzt = e.zuletzt;
+  unterseite = 'haltestellen';
+  if (e.index === undefined && strecken.length >= MAXS) {      // voll (0.8.0): fragen, welche ersetzt wird
+    ersetzen = { art: 'seite', neu: s, liste: strecken.map(function (x, i) { return { t: seitenName(x), i: i }; }) };
+    return zeigeListe();
+  }
   if (e.index === undefined) strecken.push(s); else strecken[e.index] = s;
+  vormerken();
   zeigeListe();
 }
 
@@ -446,20 +637,79 @@ document.addEventListener('click', function (ev) {
     if (!el.checked && k >= 0) e.auswahl.splice(k, 1);
     return zeigeEditor();
   }
+  if (a === 'geh') { unterseite = el.getAttribute('data-s'); return zeigeListe(); }
+  if (a === 'uebersicht') { unterseite = ''; r = null; return zeigeListe(); }
   if (a === 'neu') { neuerEntwurf(null); return zeigeEditor(); }
   if (a === 'bearbeiten') { neuerEntwurf(strecken[i]); e.index = i; return e.ohne ? ladeErreichbar() : pruefen(); }
   if (a === 'ohneZiel') { e.ohne = true; e.b = null; e.pruef = null; linienNeu(); return zeigeEditor(); }
-  if (a === 'umkreisWert') { umkreisWert = parseInt(el.value, 10) || 1000; return; }
-  if (a === 'abfahrtWert') { abfahrtWert = el.value === 'aktuell' ? 'aktuell' : 'plan'; return; }
-  if (a === 'dauerWert') { dauerWert = el.checked ? 'an' : 'aus'; return; }
-  if (a === 'quelleWert') { quelleWert = ['rmv', 'trans'].indexOf(el.value) >= 0 ? el.value : 'auto'; return; }
-  if (a === 'loeschen') { if (confirm('Seite löschen?')) { strecken.splice(i, 1); } return zeigeListe(); }
-  if (a === 'hoch' && i > 0) { strecken.splice(i - 1, 0, strecken.splice(i, 1)[0]); return zeigeListe(); }
-  if (a === 'runter' && i < strecken.length - 1) { strecken.splice(i + 1, 0, strecken.splice(i, 1)[0]); return zeigeListe(); }
-  if (a === 'layout') { layout = ['klar', 'phosphor', 'invers'].indexOf(el.value) >= 0 ? el.value : 'led'; return; }
-  if (a === 'speichern') return schliessen({ strecken: strecken, rmvKey: rmvKey, layout: layout, umkreis: umkreisWert, quelle: quelleWert, abfahrt: abfahrtWert, dauer: dauerWert });
+  if (a === 'umkreisWert') { umkreisWert = parseInt(el.value, 10) || 1000; return vormerken(); }
+  if (a === 'abfahrtWert') { abfahrtWert = el.value === 'aktuell' ? 'aktuell' : 'plan'; return vormerken(); }
+  if (a === 'dauerWert') { dauerWert = el.checked ? 'an' : 'aus'; return vormerken(); }
+  if (a === 'quelleWert') { quelleWert = ['rmv', 'trans'].indexOf(el.value) >= 0 ? el.value : 'auto'; return vormerken(); }
+  if (a === 'loeschen') { if (confirm(seitenName(strecken[i]) + ' löschen?')) { strecken.splice(i, 1); vormerken(); } return zeigeListe(); }
+  if (a === 'alle') {                                 // Alle löschen (0.8.0), je Rubrik und Favoriten
+    var art = el.getAttribute('data-s'), liste = art === 'strecken' ? routen : art === 'favoriten' ? favoriten : strecken;
+    var wort = art === 'strecken' ? 'Strecken' : art === 'favoriten' ? 'Favoriten' : 'Abfahrten';
+    if (confirm('Alle ' + liste.length + ' ' + wort + ' löschen?')) { liste.splice(0, liste.length); vormerken(); }
+    return zeigeListe();
+  }
+  if (a === 'ersetzenweg') { ersetzen = null; return zeigeListe(); }
+  if (a === 'ersetzen') {
+    var x = ersetzen.liste[i];
+    if (!x || !confirm(x.t + ' ersetzen?')) return;
+    if (ersetzen.art === 'favorit') { favoriten.splice(x.i, 1); favoriten.push(ersetzen.neu); favSuche = { text: '', treffer: [], fehler: null }; }
+    else if (ersetzen.art === 'strecke') {
+      routen.splice(x.i, 1);
+      var hin = ersetzen.hin, pos = hin === undefined ? routen.length : (x.i === hin ? x.i : hin > x.i ? hin : hin + 1);
+      routen.splice(pos, 0, ersetzen.neu);
+    } else { strecken.splice(x.i, 1); strecken.push(ersetzen.neu); }
+    var warFav = ersetzen.art === 'favorit';
+    ersetzen = null; r = null; vormerken(); zeigeListe();
+    return warFav ? namenFokus(favoriten.length - 1) : undefined;
+  }
+  if (a === 'hoch' && i > 0) { strecken.splice(i - 1, 0, strecken.splice(i, 1)[0]); vormerken(); return zeigeListe(); }
+  if (a === 'runter' && i < strecken.length - 1) { strecken.splice(i + 1, 0, strecken.splice(i, 1)[0]); vormerken(); return zeigeListe(); }
+  if (a === 'layout') { layout = ['klar', 'phosphor', 'phosphor_weiss', 'papier'].indexOf(el.value) >= 0 ? el.value : 'klar'; return vormerken(); }
+  if (a === 'invers') { inversWert = !!el.checked; return vormerken(); }
+  if (a === 'kontrast') { kontrastWert = !!el.checked; return vormerken(); }
+  if (a === 'schliessen') { schliessenWert = !!el.checked; return vormerken(); }
+  if (a === 'speichern') return schliessen(daten());   // Leiste oder Schließen: alles übergeben, Seite zu
+  // Strecken und Favoriten (0.6.1)
+  if (a === 'rneu') { r = { von: -1, nach: 0 }; return zeigeListe(); }
+  if (a === 'rweg') { r = null; return zeigeListe(); }
+  if (a === 'rok') {
+    var nach = favoriten[r.nach];
+    if (!nach) return;
+    var neuR = { von: r.von >= 0 && r.von !== r.nach ? kopie(favoriten[r.von]) : null, nach: kopie(nach), zuletzt: Math.floor(Date.now() / 1000) };
+    if (routen.length >= MAXR) { ersetzen = { art: 'strecke', neu: neuR, liste: routen.map(function (x, k) { return { t: routenName(x), i: k }; }) }; return zeigeListe(); }
+    routen.push(neuR);
+    r = null; vormerken(); return zeigeListe();
+  }
+  if (a === 'rloeschen') { if (confirm(routenName(routen[i]) + ' löschen?')) { routen.splice(i, 1); vormerken(); } return zeigeListe(); }
+  if (a === 'rhoch' && i > 0) { routen.splice(i - 1, 0, routen.splice(i, 1)[0]); vormerken(); return zeigeListe(); }
+  if (a === 'rrunter' && i < routen.length - 1) { routen.splice(i + 1, 0, routen.splice(i, 1)[0]); vormerken(); return zeigeListe(); }
+  if (a === 'rrueck') {
+    var rueck = { von: kopie(routen[i].nach), nach: kopie(routen[i].von), zuletzt: Math.floor(Date.now() / 1000) };
+    if (routen.length >= MAXR) { ersetzen = { art: 'strecke', neu: rueck, hin: i, liste: routen.map(function (x, k) { return { t: routenName(x), i: k }; }) }; return zeigeListe(); }
+    routen.splice(i + 1, 0, rueck); vormerken(); return zeigeListe();
+  }
+  if (a === 'fneu') {
+    var fn = favSuche.treffer[i];
+    if (!fn) return;
+    if (favoriten.length >= MAXF) {                 // voll: selten genutzte oben
+      var auf = favoriten.map(function (f, k) { return k; }).sort(function (p, q) { return (favoriten[p].n || 0) - (favoriten[q].n || 0); });
+      ersetzen = { art: 'favorit', neu: fn, liste: auf.map(function (k) { return { t: favoriten[k].klar, i: k }; }) };
+      return zeigeListe();
+    }
+    favoriten.push(fn); favSuche = { text: '', treffer: [], fehler: null }; vormerken(); zeigeListe();
+    return namenFokus(favoriten.length - 1);
+  }
+  if (a === 'floeschen') { if (confirm(favoriten[i].klar + ' löschen? Strecken behalten ihre Kopie.')) { favoriten.splice(i, 1); vormerken(); } return zeigeListe(); }
+  if (a === 'umstiegeWert') { umstiegeWert = parseInt(el.value, 10); return vormerken(); }
+  if (a === 'fusswegWert') { fusswegWert = parseInt(el.value, 10); return vormerken(); }
+  if (a === 'umstzeitWert') { umstzeitWert = parseInt(el.value, 10); return vormerken(); }
   if (a === 'rmvTest') return rmvPruefen();
-  if (a === 'abbrechen') return schliessen({ abbruch: true });
+  if (a === 'dbTest') return dbPruefen();
   if (a === 'nah') return naheSuchen();
   if (a === 'start') return startGewaehlt(e.suche[i]);
   if (a === 'startNeu') { e.a = null; e.b = null; e.ohne = false; e.erg = null; e.wahlLinie = null; e.pruef = null; return zeigeEditor(); }
@@ -476,6 +726,24 @@ document.addEventListener('click', function (ev) {
   if (a === 'uebernehmen') return uebernehmen();
   if (a === 'verwerfen') return zeigeListe();
 });
+
+// ---------- Android-Zurück abfangen (0.8.1) ----------
+// Ein eigener Verlaufseintrag: reicht die Pebble-App Zurück an die Seite weiter (WebView goBack), kommt popstate statt
+// Seite-zu. Dann eine Ebene hoch; ganz oben schließen, mit Daten, falls etwas geändert ist. Ungeprüft, ob die App das tut.
+function zurueckFangen() { try { history.pushState({ l8: 1 }, ''); } catch (err) { console.log('pushState: ' + err); } }
+if (typeof window !== 'undefined' && typeof history !== 'undefined') {
+  zurueckFangen();
+  window.addEventListener('popstate', function () {
+    if (ansicht === 'editor' || ersetzen) { ersetzen = null; zurueckFangen(); return zeigeListe(); }
+    if (unterseite) { unterseite = ''; r = null; zurueckFangen(); return zeigeListe(); }
+    if (geaendert) return schliessen(daten());
+    document.location = 'pebblejs://close';
+  });
+  // Seite verschwindet (X der Pebble-App, App-Wechsel): Vorgemerktes noch übergeben
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden' && geaendert) schliessen(daten());
+  });
+}
 
 zeigeListe();
 </script>

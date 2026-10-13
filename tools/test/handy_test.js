@@ -14,10 +14,15 @@ paket.pebble.messageKeys.forEach(function (k) {
   nr += n;
 });
 
-var speicher = {};
+var speicher = { layout: 'phosphor' };   // Großbuchstaben-Texte wie bisher (Standard seit 0.12.0: Klar)
 var localStorage = { getItem: function (k) { return speicher[k] === undefined ? null : speicher[k]; }, setItem: function (k, v) { speicher[k] = String(v); } };
 var schluessel = path.join(os.homedir(), '.config/rmv/accessId');
 if (process.env.RMV !== '0' && fs.existsSync(schluessel)) speicher.rmvKey = fs.readFileSync(schluessel, 'utf8').trim();
+// DB Timetables (0.9.0): mit DB=1 aus ~/.config/db/ (clientId, apiKey)
+if (process.env.DB === '1' && fs.existsSync(path.join(os.homedir(), '.config/db/apiKey'))) {
+  speicher.dbId = fs.readFileSync(path.join(os.homedir(), '.config/db/clientId'), 'utf8').trim();
+  speicher.dbKey = fs.readFileSync(path.join(os.homedir(), '.config/db/apiKey'), 'utf8').trim();
+}
 var HBF = { lat: 50.0707, lon: 8.2436 }, KURHAUS = { lat: 50.0848, lon: 8.2446 };   // Beispielorte Wiesbaden
 var standort = HBF;
 var lauscher = {};
@@ -36,7 +41,7 @@ var Pebble = {
     var m = {}; Object.keys(msg).forEach(function (k) { m[namen[k] || k] = msg[k]; });
     if (m['L_ANZAHL'] !== undefined) {
       if (m['L_ANZAHL'] < 0) { uhr.liste = null; uhr.ende++; }
-      else uhr.liste = { titel: m['L_TITEL'], n: m['L_ANZAHL'], texte: [] };
+      else uhr.liste = { titel: m['L_TITEL'], n: m['L_ANZAHL'], texte: [], frage: m['L_FRAGE'] || 0 };
     }
     if (m['L_AB'] !== undefined && uhr.liste) for (var j = 0; j < 10; j++) if (m['L_TEXT[' + j + ']'] !== undefined) uhr.liste.texte[m['L_AB'] + j] = m['L_TEXT[' + j + ']'];
     if (m['L_LADE'] !== undefined) uhr.lade.push(m['L_LADE']);
@@ -47,6 +52,9 @@ var Pebble = {
     }
     if (m['AB[0]'] !== undefined || m['STATUS'] !== undefined && m['ANZAHL'] === undefined) uhr.abfahrten.push(m);
     if (m['SPRUNG'] !== undefined) uhr.sprung.push(m['SPRUNG']);
+    if (m['H_FAV'] !== undefined) uhr.hfav = m['H_FAV'];
+    if (m['V_TEXT'] !== undefined) uhr.vtext = m['V_TEXT'];
+    if (m['D_NR'] !== undefined && m['D_AB'] === 0) uhr.detail = { nr: m['D_NR'], n: m['D_N'], stand: m['D_STAND'] };
     setTimeout(ok, 5);
   }
 };
@@ -86,7 +94,7 @@ function erwarte(titel, re, info) {
   dann(function (w) { warte(listeDa(titel), function () { console.log(zeige()); if (info) info(); if (re) waehle(re); w(); }); });
 }
 function alleHalteFallsRichtung() {   // seit 0.35: nach einer Linie kommt die Richtung, wenn es mehrere gibt
-  dann(function (w) { warte(function () { return listeDa('RICHTUNG')() || listeDa('ZIEL')(); }, function () { if (uhr.liste.titel === 'RICHTUNG') { console.log(zeige()); waehle(/^ALLE HALTE A-Z$/); } w(); }); });
+  dann(function (w) { warte(function () { return listeDa('RICHTUNG')() || listeDa('AUSSTIEG')(); }, function () { if (uhr.liste.titel === 'RICHTUNG') { console.log(zeige()); waehle(/^ALLE HALTE A-Z$/); } w(); }); });
 }
 function zurueckBis(titel) { dann(function (w) { console.log('  -> zurück'); aktion(6); w(); }); erwarte(titel, null); }
 function strecken() { return JSON.parse(speicher.seiten || '[]'); }
@@ -111,34 +119,34 @@ dann(function (w) { lauscher.ready(); w(); });
 einrichtungDa(0);
 console.log('== 1 Neue Fahrt ab Hbf, Linie 4, Ziel -> gleich gespeichert (seit 0.50 keine Rückfahrt-Frage)');
 dann(function (w) { aktion(1); w(); });
-erwarte('START', /^HAUPTBAHNHOF/);
+erwarte('HALTESTELLE', /^HAUPTBAHNHOF/);
 erwarte('LINIE', /^4$/);
 alleHalteFallsRichtung();
-erwarte('ZIEL', /^RHEINSTR/, function () { if (uhr.liste.texte[0] !== 'OHNE ZIEL') fehler('OHNE ZIEL nicht oben in der Zielliste'); });
+erwarte('AUSSTIEG', /^RHEINSTR/, function () { if (uhr.liste.texte[0] !== 'OHNE AUSSTIEG') fehler('OHNE AUSSTIEG nicht oben in der Liste'); });
 einrichtungDa(1);
 abfahrtenZeigen(function (a) { if (a['AB[0]'] && !(a['AB_F[0]'] > 0)) fehler('keine Fahrtdauer'); if (a['AB_Z[0]']) fehler('Endziel bei Seite mit Ziel'); });
 console.log('== 1b Linie 8 ab Hbf: Richtung mit OHNE ZIEL oben, Ziele in Fahrtreihenfolge, zurück bis ins Menü');
 dann(function (w) { aktion(1); w(); });
-erwarte('START', /^HAUPTBAHNHOF/);
+erwarte('HALTESTELLE', /^HAUPTBAHNHOF/);
 erwarte('LINIE', /^8$/);
-erwarte('RICHTUNG', /UEBER/, function () { var t = uhr.liste.texte; if (t[0] !== 'OHNE ZIEL' || t[t.length - 1] !== 'ALLE HALTE A-Z') fehler('OHNE ZIEL oder ALLE HALTE A-Z fehlt'); });
-erwarte('ZIEL', null);
+erwarte('RICHTUNG', /UEBER/, function () { var t = uhr.liste.texte; if (t[0] !== 'OHNE AUSSTIEG' || t[t.length - 1] !== 'ALLE HALTE A-Z') fehler('OHNE AUSSTIEG oder ALLE HALTE A-Z fehlt'); });
+erwarte('AUSSTIEG', null);
 zurueckBis('RICHTUNG');
 zurueckBis('LINIE');
-zurueckBis('START');
+zurueckBis('HALTESTELLE');
 dann(function (w) { var e0 = uhr.ende; aktion(6); warte(function () { return uhr.ende > e0; }, function () { console.log('Ende -> Uhr-Menü'); w(); }); });
 console.log('== 2 Zurück-Taste: Linie -> Start -> Ende; Abbruch während des Ladens');
 dann(function (w) { aktion(1); w(); });
-erwarte('START', /^HAUPTBAHNHOF/);
+erwarte('HALTESTELLE', /^HAUPTBAHNHOF/);
 dann(function (w) { setTimeout(function () { console.log('  -> zurück während LADE'); aktion(6); w(); }, 300); });
-erwarte('START', /^HAUPTBAHNHOF/);
+erwarte('HALTESTELLE', /^HAUPTBAHNHOF/);
 erwarte('LINIE', null);
 dann(function (w) { console.log('  -> zurück'); aktion(6); w(); });
-erwarte('START', null);
+erwarte('HALTESTELLE', null);
 dann(function (w) { var e0 = uhr.ende; console.log('  -> zurück'); aktion(6); warte(function () { return uhr.ende > e0; }, function () { console.log('Ende -> Uhr-Menü'); w(); }); });
 console.log('== 3 Rückfahrt von Seite 1 (Ziel angeboten) -> neue Seite 2 dahinter');
 dann(function (w) { aktion(2, 0); w(); });
-erwarte('RUECKFAHRT AB', /\(ZIEL\)/);
+erwarte('RUECKFAHRT AB', /\(AUSSTIEG\)/);
 einrichtungDa(2);
 dann(function (w) { var l = strecken(), h = l[0], r = l[1];
   if (r.a.name !== h.b.name || r.b.name !== h.a.name) fehler('Rückfahrt nicht Ziel -> Start: ' + r.a.name + ' -> ' + r.b.name);
@@ -159,9 +167,9 @@ dann(function (w) { var e0 = uhr.ende; aktion(6); warte(function () { return uhr
 dann(function (w) { aktion(8, 1000); w(); });
 console.log('== 4 Seite ohne Ziel (seit 0.50): Hbf, Linie 8, Richtung OHNE ZIEL');
 dann(function (w) { aktion(1); w(); });
-erwarte('START', /^HAUPTBAHNHOF/);
+erwarte('HALTESTELLE', /^HAUPTBAHNHOF/);
 erwarte('LINIE', /^8$/);
-erwarte('RICHTUNG', /^OHNE ZIEL$/);
+erwarte('RICHTUNG', /^OHNE AUSSTIEG$/);
 einrichtungDa(4);
 dann(function (w) { var st = strecken()[3]; if (st.b || st.alle || st.linien.join() !== '8') fehler('Seite ohne Ziel falsch gespeichert'); if (uhr.einrichtung.namen[3] !== 'HAUPTBAHNHOF / ') fehler('NAME_B nicht leer: ' + uhr.einrichtung.namen[3]); w(); });
 abfahrtenZeigen(function (a) { if (a['AB[0]'] && !a['AB_Z[0]']) fehler('Endziel fehlt'); if (a['AB_L[0]'] && a['AB_L[0]'] !== '8') fehler('fremde Linie ' + a['AB_L[0]']); });
@@ -170,18 +178,18 @@ abfahrtenZeigen(function (a) { if (a.QUELLE !== 'TRANS') fehler('nicht Transitou
 dann(function (w) { var n0 = uhr.abfahrten.length; aktion(9, 0); warte(function () { return uhr.abfahrten.length > n0; }, function () { w(); }); });
 console.log('== 4b Hbf, alle Linien, Ziel A-Z: OHNE ZIEL oben');
 dann(function (w) { aktion(1); w(); });
-erwarte('START', /^HAUPTBAHNHOF/);
+erwarte('HALTESTELLE', /^HAUPTBAHNHOF/);
 erwarte('LINIE', /^ALLE LINIEN$/);
-erwarte('ZIEL A-Z', /^OHNE ZIEL$/);
+erwarte('AUSSTIEG A-Z', /^OHNE AUSSTIEG$/);
 einrichtungDa(5);
 dann(function (w) { var st = strecken()[4]; if (st.b || !st.alle) fehler('alle Linien ohne Ziel falsch'); console.log('  ' + st.linien.length + ' Linien'); w(); });
 abfahrtenZeigen(function (a) { var s = [0, 1, 2].map(function (j) { return a['AB_S[' + j + ']']; }); console.log('  Steige: ' + s.join(',') + ' (verschiedene = alle Steige der Haltestelle)'); });
 console.log('== 5 Fahrt ändern (ersetzt Seite 2), Start am Kurhaus');
 dann(function (w) { standort = KURHAUS; aktion(3, 1); w(); });
-erwarte('START', /^KURHAUS/);
+erwarte('HALTESTELLE', /^KURHAUS/);
 erwarte('LINIE', /^\d/);
 alleHalteFallsRichtung();
-erwarte(/^ZIEL$/, /^(?!OHNE ZIEL)./);
+erwarte(/^AUSSTIEG$/, /^(?!OHNE AUSSTIEG)./);
 einrichtungDa(5);
 dann(function (w) { if (!/^KURHAUS/.test(strecken()[1].a.kurz)) fehler('Seite 2 nicht ersetzt'); w(); });
 console.log('== 5c Abfahrt aktuell, Fahrtdauer aus (an der Uhr), dann zurück auf Standard');
@@ -192,85 +200,67 @@ console.log('== 6 Löschen Seite 1');
 dann(function (w) { aktion(4, 0); w(); });
 einrichtungDa(4);
 
+function meter(t, sonst) {              // "450M" oder seit 0.6.2 "1.2KM" / "12KM"
+  var x = / (\d+)M$/.exec(t), y = / (\d+(?:\.\d)?)KM$/.exec(t);
+  return x ? +x[1] : y ? Math.round(parseFloat(y[1]) * 1000) : sonst;
+}
 function aufsteigendM() {              // Einstieg im Umkreis: nächste Haltestelle zuerst
-  var m = uhr.liste.texte.map(function (t) { var x = / (\d+)M$/.exec(t); return x ? +x[1] : -1; });
+  var m = uhr.liste.texte.map(function (t) { return meter(t, -1); });
   if (m.some(function (v) { return v < 0; })) fehler('Einstieg ohne Meterangabe');
   for (var i = 1; i < m.length; i++) if (m[i] < m[i - 1]) fehler('Einstieg nicht nach Entfernung sortiert');
 }
-console.log('== 7 Neue Fahrt IM UMKREIS am Kurhaus, Linie 8: kein OHNE ZIEL, Einstieg nach Entfernung, gleich gespeichert');
+console.log('== 7 Neue Abfahrt ALLE IN DER NAEHE am Kurhaus, Linie 8: kein OHNE AUSSTIEG, Einstieg nach Entfernung, gleich gespeichert');
 dann(function (w) { standort = KURHAUS; aktion(1); w(); });
-erwarte('START', /^IM UMKREIS 1KM$/);
+erwarte('HALTESTELLE', /^ALLE IN DER NAEHE 1KM$/);
 erwarte('LINIE', /^8$/);
-dann(function (w) { warte(function () { return listeDa('RICHTUNG')() || listeDa('ZIEL')(); }, function () { console.log(zeige()); if (uhr.liste.texte.indexOf('OHNE ZIEL') >= 0) fehler('OHNE ZIEL im Umkreis'); if (uhr.liste.titel === 'RICHTUNG') waehle(/^ALLE HALTE A-Z$/); w(); }); });
-erwarte('ZIEL', /./, function () { if (uhr.liste.texte.indexOf('OHNE ZIEL') >= 0) fehler('OHNE ZIEL im Umkreis'); });
+dann(function (w) { warte(function () { return listeDa('RICHTUNG')() || listeDa('AUSSTIEG')(); }, function () { console.log(zeige()); if (uhr.liste.texte.indexOf('OHNE AUSSTIEG') >= 0) fehler('OHNE AUSSTIEG im Umkreis'); if (uhr.liste.titel === 'RICHTUNG') waehle(/^ALLE HALTE A-Z$/); w(); }); });
+erwarte('AUSSTIEG', /./, function () { if (uhr.liste.texte.indexOf('OHNE AUSSTIEG') >= 0) fehler('OHNE AUSSTIEG im Umkreis'); });
 erwarte('EINSTIEG', /./, aufsteigendM);
 einrichtungDa(5);
-console.log('== 8 Schnellere Abfahrt: Beispielseite Hbf -> Kurhaus/Theater nur Linie 8, ohne Koordinaten');
-function nachMeter() {
-  var m = uhr.liste.texte.map(function (t) { var x = / (\d+)M$/.exec(t); return x ? +x[1] : 0; });
-  for (var i = 1; i < m.length; i++) if (m[i] < m[i - 1]) fehler('nicht nach Entfernung sortiert');
-}
-function schnellDurchlauf(seite, uebernehmen) {
-  dann(function (w) { aktion(12, seite); w(); });
-  dann(function (w) { warte(function () { return listeDa('SCHNELLER AB')() || listeDa('NICHTS SCHNELLER')(); }, function () {
-    console.log(zeige());
-    if (uhr.liste.titel !== 'SCHNELLER AB') { var e0 = uhr.ende; aktion(6); return warte(function () { return uhr.ende > e0; }, w); }
-    nachMeter();
-    waehle(/./);
-    warte(listeDa('AUSSTIEG'), function () {
-      console.log(zeige());
-      if (uhr.liste.texte.slice(1).some(function (t) { return /\(ZIEL\)$/.test(t); })) fehler('Ziel nicht oben');
-      waehle(/./);
-      warte(listeDa(/^BISHER /), function () {
-        console.log(zeige());
-        var fahrt = uhr.liste.texte[0];
-        waehle(/./);
-        warte(listeDa(fahrt), function () {
-          if (uhr.liste.texte.join('|') !== 'ZURUECK|UEBERNEHMEN') fehler('Mini-Menü falsch');
-          if (!uebernehmen) { var e0 = uhr.ende; waehle(/^ZURUECK$/); return warte(function () { return uhr.ende > e0; }, function () { console.log('  Zurück -> Anzeige'); w(); }); }
-          var n0 = uhr.abfahrten.length, linie = fahrt.split(' ')[0];
-          uhr.einrichtung = null;
-          waehle(/^UEBERNEHMEN$/);
-          warte(function () { return uhr.einrichtung && !uhr.liste && uhr.abfahrten.length > n0; }, function () {
-            var st = strecken()[seite], a = uhr.abfahrten[uhr.abfahrten.length - 1];
-            console.log('  übernommen: ' + st.a.kurz + ' -> ' + st.b.kurz + ' [' + st.linien + ']');
-            if (st.alle || st.linien.join() !== linie) fehler('Linie nicht übernommen');
-            if (a['AB_L[0]'] && a['AB_L[0]'] !== linie.substring(0, 4)) fehler('fremde Linie in der Anzeige: ' + a['AB_L[0]']);
-            w();
-          });
-        });
-      });
-    });
-  }); });
-}
-dann(function (w) {
-  var l = strecken();
-  l.push({ a: { id: 'de-DELFI_de:06414:6907', name: 'Wiesbaden Hauptbahnhof', kurz: 'HAUPTBAHNHOF' },
-           b: { id: 'de-DELFI_de:06414:25411:1:1', name: 'Wiesbaden Kurhaus/Theater', kurz: 'KURHAUS/THEATER' }, alle: false, linien: ['8'] });
-  speicher.seiten = JSON.stringify(l); standort = HBF; w();
+console.log('== 8 Voll (0.8.0): bis 8 auffüllen, Neu anlegen -> ERSETZEN? mit Bestätigung -> gewählte weg, neue ans Ende');
+dann(function (w) {                     // auffüllen mit Kopien der letzten Seite (spart Abfragen)
+  var l = strecken(); while (l.length < 8) l.push(JSON.parse(JSON.stringify(l[l.length - 1])));
+  l[2].a.kurz = 'WEG3'; speicher.seiten = JSON.stringify(l); standort = HBF; w();
 });
-schnellDurchlauf(5);
-console.log('== 8d Standort weit weg (Frankfurt): Rechnung ab dem Start, Liste nicht leer');
-dann(function (w) { standort = { lat: 50.107, lon: 8.663 }; w(); });
-schnellDurchlauf(5);
-console.log('== 8f Bezug (seit 0.41): erste Fahrt, die man zu Fuß erreicht, 50 m Luftlinie je Minute');
-dann(function (w) {
-  var j = Math.floor(Date.now() / 1000), x = { lat: 50.0707, lon: 8.2436 }, liste = [{ ab: j + 120 }, { ab: j + 900 }];
-  var weg = { lat: 50.0707 + 500 / 111320, lon: 8.2436 };
-  var b1 = ctx.bezugWaehlen(liste, null, x), b2 = ctx.bezugWaehlen(liste, weg, x), b3 = ctx.bezugWaehlen(liste, { lat: 50.2, lon: 8.2436 }, x);
-  if (!b1 || b1.ab !== j + 120 || !b2 || b2.ab !== j + 900 || !b3 || b3.ab !== j + 120) fehler('Bezugswahl');
-  if (ctx.bezugWaehlen([{ ab: j + 120 }], weg, x) !== null) fehler('unerreichbarer Bezug gewählt');
-  w();
-});
-console.log('== 8e Übernehmen auf der Beispielseite, Standort Kurhaus');
-dann(function (w) { standort = KURHAUS; w(); });
-schnellDurchlauf(5, true);
-console.log('== 8g Schneller auf Seite ohne Ziel: Handy beendet gleich');
-dann(function (w) { var e0 = uhr.ende, i = strecken().findIndex(function (s) { return !s.b; }); aktion(12, i); warte(function () { return uhr.ende > e0; }, function () { console.log('  beendet'); w(); }); });
+dann(function (w) { aktion(1); w(); });
+erwarte('HALTESTELLE', /^HAUPTBAHNHOF/);
+erwarte('LINIE', /^4$/);
+alleHalteFallsRichtung();
+erwarte('AUSSTIEG', /^RHEINSTR/);
+erwarte('ERSETZEN?', null, function () { if (uhr.liste.n !== 8) fehler('nicht alle 8 Seiten zur Wahl'); if (uhr.liste.frage !== 255) fehler('Bestätigung fehlt: ' + uhr.liste.frage); });
+dann(function (w) { console.log('  -> wähle ' + uhr.liste.texte[2] + ' (bestätigt)'); uhr.einrichtung = null; aktion(5, 2); w(); });
+einrichtungDa(8);
+dann(function (w) { var l = strecken();
+  if (l.some(function (x) { return x.a.kurz === 'WEG3'; })) fehler('gewählte Seite nicht ersetzt');
+  if (!/^RHEINSTR/.test(l[7].b.kurz) || speicher.seite !== '7') fehler('neue Seite nicht am Ende'); w(); });
+console.log('== 8a Rückfahrt bei voller Rubrik: ERSETZEN?, die Rückfahrt steht direkt hinter ihrer Hinfahrt');
+dann(function (w) { aktion(2, 7); w(); });
+erwarte('RUECKFAHRT AB', /\(AUSSTIEG\)/);
+erwarte('ERSETZEN?', null);
+dann(function (w) { console.log('  -> wähle ' + uhr.liste.texte[0]); uhr.einrichtung = null; aktion(5, 0); w(); });
+einrichtungDa(8);
+dann(function (w) { var l = strecken(); if (l[7].a.name !== l[6].b.name || l[7].b.name !== l[6].a.name) fehler('Rückfahrt nicht hinter der Hinfahrt'); w(); });
+console.log('== 8b FAVORIT: Start der Seite 8 aus dem Menü, Maske an die Uhr');
+dann(function (w) { var e0 = uhr.ende; lauscher.appmessage({ payload: { AKTION: 35, WAHL: 7 * 2, RUBRIK: 0 } });
+  warte(function () { return uhr.ende > e0; }, function () {
+    var f = JSON.parse(speicher.favoriten || '[]');
+    console.log('  Favoriten: ' + f.map(function (x) { return x.kurz; }).join(', ') + ' | H_FAV ' + uhr.hfav);
+    if (f.length !== 1 || !(uhr.hfav & (1 << 14))) fehler('Favorit oder Maske fehlt'); w(); }); });
+console.log('== 8c Favoriten an der Uhr: umbenennen per Diktat, Strecke mit dem Ort zieht mit');
+dann(function (w) { var f = JSON.parse(speicher.favoriten)[0]; speicher.routen = JSON.stringify([{ von: null, nach: JSON.parse(JSON.stringify(f)) }]); aktion(25); w(); });
+erwarte('FAVORITEN', /^RHEINSTR/, function () { var t = uhr.liste.texte; if (t[0] !== 'FAVORIT NEU 1/20' || t[t.length - 1] !== 'ALLE 1 LOESCHEN' || !(uhr.liste.frage & (1 << 2))) fehler('Favoritenliste falsch'); });
+erwarte(/^RHEINSTR/, /^UMBENENNEN$/, function () { if (!(uhr.liste.frage & 2)) fehler('LOESCHEN ohne Bestätigung'); });
+dann(function (w) { var e0 = uhr.ende; warte(function () { return uhr.ende > e0 || uhr.liste === null; }, function () {   // Diktat (L_ANZAHL -4)
+  lauscher.appmessage({ payload: { AKTION: 27, WAHL: 0, TEXT: 'Zuhause.' } }); w(); }); });
+erwarte('FAVORITEN', null, function () {
+  var r = JSON.parse(speicher.routen)[0];
+  if (uhr.liste.texte[1].indexOf('ZUHAUSE') !== 0 || r.nach.kurz !== 'ZUHAUSE' || r.nach.klar !== 'Zuhause') fehler('Umbenennen nicht übernommen: ' + uhr.liste.texte[1] + ' / ' + r.nach.kurz); });
+dann(function (w) { var e0 = uhr.ende; aktion(6); warte(function () { return uhr.ende > e0; }, function () { console.log('  Zurück -> Einstellungen'); w(); }); });
 console.log('== 9 Startseite nach Standort (seit 0.50)');
 dann(function (w) {
   var l = strecken(), hbf = l.findIndex(function (s) { return /HAUPTBAHNHOF/.test(s.a.kurz) && s.a.lat !== undefined; });
-  delete speicher.ort; speicher.seite = String(hbf); standort = KURHAUS; uhr.sprung = [];
+  delete speicher.ort; speicher.offen = '0';   // seit 0.6.6 springt es nur nach einer längeren Pause (PAUSE_S)
+  speicher.seite = String(hbf); standort = KURHAUS; uhr.sprung = [];
   lauscher.ready();
   warte(function () { return uhr.sprung.length; }, function () {
     var i = uhr.sprung[0], st = strecken()[i];
@@ -306,6 +296,39 @@ hier(1, function (a) { if (a.HIER_NR !== 1) fehler('nicht die zweite'); });
 hier(-1, function (a) { if (a.HIER_NR !== a.HIER_N - 1) fehler('rückwärts nicht umgelaufen'); });
 dann(function (w) { standort = KURHAUS; w(); });
 hier(0, function (a) { if (!/KURHAUS/.test(a.HIER_NAME)) fehler('Standort nicht neu geholt'); });
+console.log('== 11 Abfahrt speichern aus Abfahrten hier (voll: ersetzen), dann alle Abfahrten und Favoriten löschen');
+dann(function (w) { standort = HBF; w(); });
+hier(0);
+dann(function (w) { lauscher.appmessage({ payload: { AKTION: 36, WAHL: 0, RUBRIK: 0 } }); w(); });
+erwarte('ERSETZEN?', null);
+dann(function (w) { uhr.einrichtung = null; aktion(5, 0); w(); });
+einrichtungDa(8);
+dann(function (w) { var l = strecken(), st = l[7]; if (st.b || !st.alle || !/HAUPTBAHNHOF/.test(st.a.kurz)) fehler('Abfahrt hier nicht gespeichert'); w(); });
+dann(function (w) { uhr.einrichtung = null; aktion(34, 0); w(); });
+einrichtungDa(0);
+dann(function (w) { aktion(25); w(); });
+dann(function (w) { warte(listeDa('FAVORITEN'), function () { var i = uhr.liste.texte.length - 1; console.log('  -> wähle ' + uhr.liste.texte[i] + ' (bestätigt)'); uhr.liste = null; aktion(5, i); w(); }); });
+erwarte('FAVORITEN', null, function () { if (JSON.parse(speicher.favoriten).length || uhr.liste.texte[0] !== 'FAVORIT NEU 0/20') fehler('Favoriten nicht gelöscht'); });
+dann(function (w) { var e0 = uhr.ende; aktion(6); warte(function () { return uhr.ende > e0; }, w); });
+console.log('== 12 Vorschlag FRUEHER DA (Bezug künstlich 4 h später): Text an die Uhr, DETAIL 3 mit Details, FAHRT STARTEN möglich');
+dann(function (w) {
+  var j = Math.floor(Date.now() / 1000); uhr.vtext = undefined; uhr.detail = null;
+  ctx.vorschlagPruefen(0, 0, 'test', { lat: HBF.lat, lon: HBF.lon }, { name: 'Wiesbaden Kurhaus/Theater', lat: KURHAUS.lat, lon: KURHAUS.lon },
+                       { led: 'KURHAUS', klar: 'Kurhaus' }, function () { return j + 4 * 3600; });
+  warte(function () { return uhr.vtext !== undefined; }, function () {
+    console.log('  V_TEXT: ' + uhr.vtext);
+    if (!/^FRUEHER DA -\d+'\|/.test(uhr.vtext)) fehler('kein Vorschlag');
+    if (!/\|AN \d\d:\d\d/.test(uhr.vtext)) fehler('Ankunft nicht vollständig vorn: ' + uhr.vtext);   // 0.12.0
+    if (Buffer.byteLength(uhr.vtext) > 63) fehler('Vorschlag zu lang für die Uhr');
+    ctx.vorschlagDetailSenden(0, 0);
+    warte(function () { return uhr.detail; }, function () {
+      console.log('  Details: Nummer ' + uhr.detail.nr + ', ' + uhr.detail.n + ' Zeilen, Stand ' + hmZ(uhr.detail.stand));
+      if (uhr.detail.nr !== 3 || !(uhr.detail.n > 0) || !(uhr.detail.stand > 0)) fehler('Vorschlag-Details fehlen');
+      if (!ctx.letztesDetail || ctx.letztesDetail.art !== 'route') fehler('FAHRT STARTEN hätte keine Grundlage');
+      w();
+    });
+  });
+});
 function fertig() {
   console.log('Lade-Meldungen: ' + uhr.lade.length + ' (z. B. ' + uhr.lade.slice(0, 6).join(', ') + ')');
   console.log('Größte Nachricht: ' + uhr.groesste + ' Bytes (Puffer Uhr 2048)');

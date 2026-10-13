@@ -7,22 +7,34 @@ var schrift = JSON.parse(fs.readFileSync(path.join(basis, 'schrift.json'), 'utf8
 var fehler = 0;
 function pruefe(ok, text) { console.log((ok ? 'ok     ' : 'FEHLER ') + text); if (!ok) fehler++; }
 
-// 1. Seite: Standard LED, Klar wählen, speichern
+// 1. Seite: Standard Klar (seit 0.12.0, LED entfernt), Phosphor und zurück auf Klar wählen, speichern
 var seite = require(path.join(basis, 'einstellungen_seite.js'));
 var strecke = { a: { id: 'x', name: 'Wiesbaden Hauptbahnhof', kurz: 'HAUPTBAHNHOF' }, b: { id: 'y', name: 'Wiesbaden Luisenplatz', kurz: 'LUISENPLATZ' },
                 linien: ['4'], alle: true };
-var html = seite.replace('/*ZUSTAND*/null', JSON.stringify({ strecken: [strecke], schrift: schrift.F35, rmvKey: '' }));
+var html = seite.replace('/*ZUSTAND*/null', JSON.stringify({ strecken: [strecke], schrift: schrift.F35, rmvKey: '', unterseite: 'anzeige' }));
 var app = { innerHTML: '' }, klick = null, rueck = null;
-var ctx = { document: { getElementById: function (id) { return id === 'app' ? app : null; }, addEventListener: function (t, f) { klick = f; },
+var ctx = { document: { getElementById: function (id) { return id === 'app' ? app : null; }, querySelectorAll: function () { return []; }, addEventListener: function (t, f) { klick = f; },
                         set location(v) { rueck = JSON.parse(decodeURIComponent(v.split('#')[1])); } },
             setTimeout: setTimeout, clearTimeout: clearTimeout, setInterval: function () {}, console: console, JSON: JSON, Math: Math };
 vm.createContext(ctx);
 vm.runInContext(html.substring(html.indexOf('<script>') + 8, html.lastIndexOf('</script>')), ctx);
-function klicke(attr) { klick({ target: { getAttribute: function (k) { return attr[k] === undefined ? null : attr[k]; }, value: attr.value, parentNode: null } }); }
-pruefe(/value="led" checked/.test(app.innerHTML), 'Seite: LED ist vorausgewählt');
+function klicke(attr) { klick({ target: { getAttribute: function (k) { return attr[k] === undefined ? null : attr[k]; }, value: attr.value, checked: attr.checked, parentNode: null } }); }
+pruefe(/value="klar" checked/.test(app.innerHTML), 'Seite: Klar ist vorausgewählt');
+pruefe(!/value="led"/.test(app.innerHTML), 'Seite: keine LED-Ansicht mehr');
+klicke({ 'data-a': 'layout', value: 'led' });          // alte Angabe: bleibt Klar
 klicke({ 'data-a': 'layout', value: 'klar' });
 klicke({ 'data-a': 'speichern' });
 pruefe(rueck && rueck.layout === 'klar', 'Seite: Rückgabe layout = klar');
+pruefe(rueck && rueck.invers === false && rueck.kontrast === false && rueck.schliessen === false, 'Seite: Invertiert, Kontrast, Schließen aus');
+// Farben (0.9.1): zweite Seite, Phosphor weiß, invertiert, hoher Kontrast
+var rueck1 = rueck; rueck = null;
+html = seite.replace('/*ZUSTAND*/null', JSON.stringify({ strecken: [strecke], schrift: schrift.F35, rmvKey: '', unterseite: 'anzeige', layout: 'klar' }));
+vm.runInContext(html.substring(html.indexOf('<script>') + 8, html.lastIndexOf('</script>')), ctx);
+pruefe(/value="klar" checked/.test(app.innerHTML) && /data-a="invers">/.test(app.innerHTML), 'Seite: Klar gewählt, Invertiert aus');
+klicke({ 'data-a': 'layout', value: 'phosphor_weiss' }); klicke({ 'data-a': 'invers', checked: true }); klicke({ 'data-a': 'kontrast', checked: true }); klicke({ 'data-a': 'schliessen', checked: true });
+klicke({ 'data-a': 'speichern' });
+pruefe(rueck && rueck.layout === 'phosphor_weiss' && rueck.invers === true && rueck.kontrast === true && rueck.schliessen === true, 'Seite: Phosphor weiß, invertiert, Kontrast, schließen');
+var rueck2 = rueck; rueck = rueck1;
 
 // 2. Handy-Skript: Rückgabe übernehmen, Einrichtung prüfen
 var keys = {}, nr = 10000, namen = {};
@@ -49,7 +61,7 @@ function warte() { return new Promise(function (r) { setTimeout(r, 30); }); }
 (async function () {
 lauscher.ready();
 await warte();
-pruefe(gesendet[0][keys.LAYOUT] === 0, 'Handy: ohne Einstellung LAYOUT = 0 (LED)');
+pruefe(gesendet[0][keys.LAYOUT] === 1, 'Handy: ohne Einstellung LAYOUT = 1 (Klar)');
 gesendet = [];
 await warte();
 lauscher.webviewclosed({ response: encodeURIComponent(JSON.stringify(rueck)) });
@@ -58,22 +70,35 @@ var e = gesendet[0];
 pruefe(speicher.layout === 'klar', 'Handy: layout gespeichert');
 pruefe(e[keys.LAYOUT] === 1, 'Handy: Einrichtung mit LAYOUT = 1');
 pruefe(e[keys.KLAR_A] === 'Hauptbahnhof' && e[keys.KLAR_B] === 'Luisenplatz', 'Handy: Klar-Namen ' + e[keys.KLAR_A] + ' / ' + e[keys.KLAR_B]);
-pruefe(e[keys.NAME_A] === 'HAUPTBAHNHOF' && e[keys.NAME_B] === 'LUISENPLATZ', 'Handy: LED-Namen, NAME_B = Ziel');
+pruefe(e[keys.NAME_A] === 'HAUPTBAHNHOF' && e[keys.NAME_B] === 'LUISENPLATZ', 'Handy: Großbuchstaben-Namen, NAME_B = Ziel');
 lauscher.appmessage({ payload: { AKTION: 7, WAHL: 0 } });
 await warte();
-pruefe(speicher.layout === 'led', 'Handy: Umschalten an der Uhr (AKTION 7) gespeichert');
+pruefe(speicher.layout === 'klar', 'Handy: alte LED von der Uhr (AKTION 7, WAHL 0) wird Klar');
 lauscher.appmessage({ payload: { AKTION: 7, WAHL: 2 } });
 await warte();
 pruefe(speicher.layout === 'phosphor', 'Handy: Phosphor an der Uhr (AKTION 7, WAHL 2) gespeichert');
 lauscher.appmessage({ payload: { AKTION: 7, WAHL: 3 } });
 await warte();
-pruefe(speicher.layout === 'invers', 'Handy: LED invers an der Uhr (AKTION 7, WAHL 3) gespeichert');
+pruefe(speicher.layout === 'klar' && speicher.invers === '0', 'Handy: altes LED invers (WAHL 3) wird Klar, nicht invertiert');
+speicher.layout = 'invers'; delete speicher.invers;
+gesendet = []; lauscher.ready(); await warte();
+pruefe(gesendet[0][keys.LAYOUT] === 1, 'Handy: alter Speicherstand layout=invers sendet LAYOUT = 1 (Klar)');
+lauscher.appmessage({ payload: { AKTION: 7, WAHL: 4 + 8 + 16 } });
+await warte();
+pruefe(speicher.layout === 'phosphor_weiss' && speicher.invers === '1' && speicher.kontrast === '1', 'Handy: Phosphor weiß + invertiert + Kontrast an der Uhr');
+gesendet = []; lauscher.ready(); await warte();
+pruefe(gesendet[0][keys.LAYOUT] === 28, 'Handy: Einrichtung mit LAYOUT = 28');
+lauscher.webviewclosed({ response: encodeURIComponent(JSON.stringify(rueck2)) }); await warte();
+pruefe(speicher.layout === 'phosphor_weiss' && speicher.invers === '1' && speicher.kontrast === '1' && speicher.schliessen === '1', 'Handy: Rückgabe der Seite mit Farben und Schließen gespeichert');
+gesendet = []; lauscher.ready(); await warte();
+pruefe(gesendet[0][keys.LAYOUT] === 60, 'Handy: Einrichtung mit LAYOUT = 60 (4 + 8 + 16 + 32)');
+speicher.invers = '0'; speicher.kontrast = '0'; speicher.schliessen = '0';
 lauscher.appmessage({ payload: { AKTION: 7, WAHL: 2 } });
 await warte();
 gesendet = []; lauscher.ready();
 await warte();
 pruefe(gesendet[0][keys.LAYOUT] === 2, 'Handy: Einrichtung mit LAYOUT = 2 (Phosphor)');
-pruefe(gesendet[0][keys.NAME_A] === 'HAUPTBAHNHOF', 'Handy: Phosphor nutzt LED-Namen');
+pruefe(gesendet[0][keys.NAME_A] === 'HAUPTBAHNHOF', 'Handy: Phosphor nutzt Großbuchstaben-Namen');
 // Seite ohne Ziel (0.50): NAME_B und KLAR_B leer
 speicher.seiten = JSON.stringify([{ a: strecke.a, b: null, linien: ['8'], alle: false }]);
 await warte(); gesendet = []; lauscher.ready();
