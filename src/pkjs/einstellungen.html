@@ -66,6 +66,9 @@ var dauerWert = (ZUSTAND && ZUSTAND.dauer) === 'aus' ? 'aus' : 'an';            
 var quelleWert = ['rmv', 'trans'].indexOf(ZUSTAND && ZUSTAND.quelle) >= 0 ? ZUSTAND.quelle : 'auto';   // Quelle der Abfahrten
 // Seit 0.6.1: Strecken (von Standort oder Favorit zu einem Favoriten), Favoriten (seit 0.8.0 bis 20), Verbindungssuche
 var MAXR = 8, MAXF = 20;
+// Rückfrage auf der Seite selbst (0.13.1): confirm() und alert() zeigt die Pebble-App auf Android nicht an, confirm()
+// gilt dort als Nein — Löschen tat nichts (GitHub-Issue #1). Schlüssel der offenen Frage: h3, r2, f5, alle-<rubrik>, e4
+var frage = '';
 var ersetzen = null;               // Voll (0.8.0): { art: 'seite' | 'strecke' | 'favorit', neu, hin, liste: [{ t, i }] }
 function favReihe() {              // Favoriten nach Häufigkeit wie auf der Uhr (Index ins Feld)
   return favoriten.map(function (f, i) { return i; }).sort(function (a, b) {
@@ -151,12 +154,28 @@ function zeigeListe() {
 function ersetzenHtml() {
   return '<h1>Voll: welche ersetzen?</h1><div class="klein">Die gewählte fällt weg, die neue kommt ans Ende' +
     (ersetzen.art === 'favorit' ? '. Selten genutzte stehen oben.' : ' (eine Rückfahrt hinter ihre Hinfahrt).') + '</div><ul class="menue">' +
-    ersetzen.liste.map(function (x, k) { return '<li data-a="ersetzen" data-i="' + k + '">' + esc(x.t) + '</li>'; }).join('') +
+    ersetzen.liste.map(function (x, k) {
+      return '<li data-a="frage" data-k="e' + k + '">' + esc(x.t) + '</li>' +
+        (frage === 'e' + k ? '<li class="gewaehlt">' + frageHtml('e' + k, x.t + ' ersetzen?', 'Ja, ersetzen') + '</li>' : '');
+    }).join('') +
     '</ul><button data-a="ersetzenweg">Abbrechen</button>';
 }
 function seitenName(s) { return s.a.kurz + (s.b ? ' → ' + s.b.kurz : ''); }
 function routenName(x) { return (x.von ? x.von.klar : 'Hier') + ' → ' + x.nach.klar; }
-function alleLoeschenKnopf(art, n) { return n ? '<button class="klein" data-a="alle" data-s="' + art + '">Alle ' + n + ' löschen</button>' : ''; }
+function frageHtml(k, text, ja) {        // offene Rückfrage: Text, „Ja“ und „Nein“ an Ort und Stelle
+  return '<div class="hinweis">' + esc(text) + '</div><button class="haupt" data-a="ja" data-k="' + k + '">' + ja + '</button>' +
+    '<button data-a="nein">Nein</button>';
+}
+function loeschKnopf(k, text, extra) {
+  if (frage === k) return frageHtml(k, text, 'Ja, löschen');
+  return '<button class="klein" data-a="frage" data-k="' + k + '"' + (extra || '') + '>Löschen</button>';
+}
+function alleLoeschenKnopf(art, n) {
+  if (!n) return '';
+  var wort = art === 'strecken' ? 'Strecken' : art === 'favoriten' ? 'Favoriten' : 'Abfahrten';
+  if (frage === 'alle-' + art) return frageHtml('alle-' + art, 'Alle ' + n + ' ' + wort + ' löschen?', 'Ja, alle löschen');
+  return '<button class="klein" data-a="frage" data-k="alle-' + art + '">Alle ' + n + ' löschen</button>';
+}
 function haltestellenHtml() {
   var h = '<div class="klein"><b>Du weißt, wie du fährst. Die App sagt dir, wann.</b> ' +
     'Abfahrten ab einer Haltestelle, ohne Umstieg — mit Ausstieg samt Ankunft und Fahrtdauer, ohne Ausstieg mit dem Endziel jeder Fahrt. ' +
@@ -170,7 +189,7 @@ function haltestellenHtml() {
       '<button class="klein" data-a="hoch" data-i="' + i + '"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
       '<button class="klein" data-a="runter" data-i="' + i + '"' + (i === strecken.length - 1 ? ' disabled' : '') + '>▼</button>' +
       '<button class="klein" data-a="bearbeiten" data-i="' + i + '">Ändern</button>' +
-      '<button class="klein" data-a="loeschen" data-i="' + i + '">Löschen</button></div>';
+      loeschKnopf('h' + i, seitenName(s) + ' löschen?') + '</div>';
   });
   h += '<button data-a="neu">+ Neu anlegen</button>' + alleLoeschenKnopf('haltestellen', strecken.length);
   if (strecken.length >= MAXS) h += '<div class="klein">Voll (' + MAXS + '): beim Anlegen wählst du, welche ersetzt wird.</div>';
@@ -249,7 +268,7 @@ function routenHtml() {
       '<button class="klein" data-a="rhoch" data-i="' + i + '"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
       '<button class="klein" data-a="rrunter" data-i="' + i + '"' + (i === routen.length - 1 ? ' disabled' : '') + '>▼</button>' +
       (x.von ? '<button class="klein" data-a="rrueck" data-i="' + i + '">Rückfahrt</button>' : '') +
-      '<button class="klein" data-a="rloeschen" data-i="' + i + '">Löschen</button></div>';
+      loeschKnopf('r' + i, routenName(x) + ' löschen?') + '</div>';
   });
   if (r) {
     h += '<div class="karte"><b>Strecke neu anlegen</b><div class="klein">Von</div><select id="rvon"><option value="-1">Hier (mein Standort)</option>' +
@@ -270,7 +289,7 @@ function favoritenHtml() {
     var f = favoriten[i];
     h += '<div class="karte"><div class="klein">Name auf der Uhr, z. B. Zuhause</div><input type="text" maxlength="30" data-fname="' + i + '" value="' + esc(f.klar) + '">' +
       '<span class="klein">' + esc(f.name + (f.stadt && f.name.indexOf(f.stadt) < 0 ? ', ' + f.stadt : '')) + ' · ' + (f.typ === 'halt' ? 'Haltestelle' : 'Adresse') + '</span><br>' +
-      '<button class="klein" data-a="floeschen" data-i="' + i + '">Löschen</button></div>';
+      loeschKnopf('f' + i, f.klar + ' löschen? Strecken behalten ihre Kopie.') + '</div>';
   });
   h += '<input type="text" id="favSuche" placeholder="Adresse oder Haltestelle suchen" autocomplete="off" value="' + esc(favSuche.text) + '">';
   if (favSuche.fehler) h += '<div class="fehler">' + esc(favSuche.fehler) + '</div>';
@@ -552,7 +571,7 @@ function zielGewaehlt(z) {
       var m = entfernung(z.lat, z.lon, t.lat, t.lon) - (t.name === z.name ? 1000 : 0);
       if (m < bm) { bm = m; best = t; }
     });
-    if (!best) { alert('Zu dieser Haltestelle wurde keine Kennung gefunden.'); return; }
+    if (!best) { e.ergFehler = 'Zu dieser Haltestelle wurde keine Kennung gefunden.'; e.erg = null; return zeigeEditor(); }
     e.b = { id: best.id, name: z.name, kurz: kurzname(z.name, stadtVon(e.a.name)), lat: z.lat, lon: z.lon };
     e.ohne = false;
     e.zielLinien = Object.keys(z.linien); e.zielHin = z.hin; e.zielRueck = z.rueck;
@@ -624,12 +643,42 @@ function schliessen(daten) {
   document.location = 'pebblejs://close#' + encodeURIComponent(JSON.stringify(daten));
 }
 
+// „Ja“ einer Rückfrage (0.13.1): h<i> Abfahrt, r<i> Strecke, f<i> Favorit, alle-<rubrik>, e<i> Eintrag der Ersetzen-Liste
+function frageJa(k) {
+  frage = '';
+  var i = parseInt(k.slice(1), 10);
+  if (k.indexOf('alle-') === 0) {                     // Alle löschen (0.8.0), je Rubrik und Favoriten
+    var art = k.slice(5), liste = art === 'strecken' ? routen : art === 'favoriten' ? favoriten : strecken;
+    liste.splice(0, liste.length); vormerken(); return zeigeListe();
+  }
+  if (k[0] === 'h' && strecken[i]) { strecken.splice(i, 1); vormerken(); }
+  else if (k[0] === 'r' && routen[i]) { routen.splice(i, 1); vormerken(); }
+  else if (k[0] === 'f' && favoriten[i]) { favoriten.splice(i, 1); vormerken(); }
+  else if (k[0] === 'e' && ersetzen && ersetzen.liste[i]) {
+    var x = ersetzen.liste[i];
+    if (ersetzen.art === 'favorit') { favoriten.splice(x.i, 1); favoriten.push(ersetzen.neu); favSuche = { text: '', treffer: [], fehler: null }; }
+    else if (ersetzen.art === 'strecke') {
+      routen.splice(x.i, 1);
+      var hin = ersetzen.hin, pos = hin === undefined ? routen.length : (x.i === hin ? x.i : hin > x.i ? hin : hin + 1);
+      routen.splice(pos, 0, ersetzen.neu);
+    } else { strecken.splice(x.i, 1); strecken.push(ersetzen.neu); }
+    var warFav = ersetzen.art === 'favorit';
+    ersetzen = null; r = null; vormerken(); zeigeListe();
+    return warFav ? namenFokus(favoriten.length - 1) : undefined;
+  }
+  return zeigeListe();
+}
+
 // ---------- Klicks ----------
 document.addEventListener('click', function (ev) {
   var el = ev.target;
   while (el && el !== document && !el.getAttribute('data-a')) el = el.parentNode;
   if (!el || el === document) return;
   var a = el.getAttribute('data-a'), i = parseInt(el.getAttribute('data-i'), 10);
+  if (a === 'frage') { frage = el.getAttribute('data-k'); return zeigeListe(); }
+  if (a === 'nein') { frage = ''; return zeigeListe(); }
+  if (a === 'ja') return frageJa(el.getAttribute('data-k'));
+  frage = '';                                         // jede andere Aktion schließt die offene Frage
   if (a === 'lin') {
     var l = el.value, k = e.auswahl.indexOf(l);
     if (el.checked && k < 0) e.auswahl.push(l);
@@ -645,27 +694,7 @@ document.addEventListener('click', function (ev) {
   if (a === 'abfahrtWert') { abfahrtWert = el.value === 'aktuell' ? 'aktuell' : 'plan'; return vormerken(); }
   if (a === 'dauerWert') { dauerWert = el.checked ? 'an' : 'aus'; return vormerken(); }
   if (a === 'quelleWert') { quelleWert = ['rmv', 'trans'].indexOf(el.value) >= 0 ? el.value : 'auto'; return vormerken(); }
-  if (a === 'loeschen') { if (confirm(seitenName(strecken[i]) + ' löschen?')) { strecken.splice(i, 1); vormerken(); } return zeigeListe(); }
-  if (a === 'alle') {                                 // Alle löschen (0.8.0), je Rubrik und Favoriten
-    var art = el.getAttribute('data-s'), liste = art === 'strecken' ? routen : art === 'favoriten' ? favoriten : strecken;
-    var wort = art === 'strecken' ? 'Strecken' : art === 'favoriten' ? 'Favoriten' : 'Abfahrten';
-    if (confirm('Alle ' + liste.length + ' ' + wort + ' löschen?')) { liste.splice(0, liste.length); vormerken(); }
-    return zeigeListe();
-  }
   if (a === 'ersetzenweg') { ersetzen = null; return zeigeListe(); }
-  if (a === 'ersetzen') {
-    var x = ersetzen.liste[i];
-    if (!x || !confirm(x.t + ' ersetzen?')) return;
-    if (ersetzen.art === 'favorit') { favoriten.splice(x.i, 1); favoriten.push(ersetzen.neu); favSuche = { text: '', treffer: [], fehler: null }; }
-    else if (ersetzen.art === 'strecke') {
-      routen.splice(x.i, 1);
-      var hin = ersetzen.hin, pos = hin === undefined ? routen.length : (x.i === hin ? x.i : hin > x.i ? hin : hin + 1);
-      routen.splice(pos, 0, ersetzen.neu);
-    } else { strecken.splice(x.i, 1); strecken.push(ersetzen.neu); }
-    var warFav = ersetzen.art === 'favorit';
-    ersetzen = null; r = null; vormerken(); zeigeListe();
-    return warFav ? namenFokus(favoriten.length - 1) : undefined;
-  }
   if (a === 'hoch' && i > 0) { strecken.splice(i - 1, 0, strecken.splice(i, 1)[0]); vormerken(); return zeigeListe(); }
   if (a === 'runter' && i < strecken.length - 1) { strecken.splice(i + 1, 0, strecken.splice(i, 1)[0]); vormerken(); return zeigeListe(); }
   if (a === 'layout') { layout = layoutWahl(el.value); return vormerken(); }
@@ -684,7 +713,6 @@ document.addEventListener('click', function (ev) {
     routen.push(neuR);
     r = null; vormerken(); return zeigeListe();
   }
-  if (a === 'rloeschen') { if (confirm(routenName(routen[i]) + ' löschen?')) { routen.splice(i, 1); vormerken(); } return zeigeListe(); }
   if (a === 'rhoch' && i > 0) { routen.splice(i - 1, 0, routen.splice(i, 1)[0]); vormerken(); return zeigeListe(); }
   if (a === 'rrunter' && i < routen.length - 1) { routen.splice(i + 1, 0, routen.splice(i, 1)[0]); vormerken(); return zeigeListe(); }
   if (a === 'rrueck') {
@@ -703,7 +731,6 @@ document.addEventListener('click', function (ev) {
     favoriten.push(fn); favSuche = { text: '', treffer: [], fehler: null }; vormerken(); zeigeListe();
     return namenFokus(favoriten.length - 1);
   }
-  if (a === 'floeschen') { if (confirm(favoriten[i].klar + ' löschen? Strecken behalten ihre Kopie.')) { favoriten.splice(i, 1); vormerken(); } return zeigeListe(); }
   if (a === 'umstiegeWert') { umstiegeWert = parseInt(el.value, 10); return vormerken(); }
   if (a === 'fusswegWert') { fusswegWert = parseInt(el.value, 10); return vormerken(); }
   if (a === 'umstzeitWert') { umstzeitWert = parseInt(el.value, 10); return vormerken(); }

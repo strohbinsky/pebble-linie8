@@ -15,7 +15,7 @@ var document = {
   set location(v) { ergebnis = JSON.parse(decodeURIComponent(v.split('#')[1])); }
 };
 var ctx = { document: document, XMLHttpRequest: X.XMLHttpRequest, setTimeout: setTimeout, clearTimeout: clearTimeout,
-            setInterval: function () {}, alert: console.log, confirm: function () { return true; }, console: console, JSON: JSON, Math: Math };
+            setInterval: function () {}, alert: function () { throw new Error("alert() geht in der Pebble-App nicht"); }, confirm: function () { throw new Error("confirm() geht in der Pebble-App nicht"); }, console: console, JSON: JSON, Math: Math };
 vm.createContext(ctx);
 vm.runInContext(script, ctx);
 function klicke(attr) { klick({ target: { value: attr.value, checked: attr.checked, getAttribute: function (k) { return attr[k] === undefined ? null : attr[k]; }, parentNode: null } }); }
