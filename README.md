@@ -52,7 +52,7 @@ passenden Verbindungen, unten die Zielzeit.*
 
 ## Installation
 
-1. `linie8.pbw` aus dem [neuesten Release](../../releases/latest) laden
+1. `linie8.pbw` aus dem neuesten Eintrag unter [Releases](../../releases) laden
 2. Am Android-Handy mit der Pebble-App (Core Devices) öffnen, sie installiert die App auf der Uhr
 3. App öffnen, **Select lang** drücken, `NEU ANLEGEN`
 
