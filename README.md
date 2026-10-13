@@ -8,12 +8,12 @@ RMV und der DB. Das Handy kann in der Tasche bleiben.
 Angefangen hat die App als Anzeige für die Buslinie 8 in Wiesbaden. Fahrpläne kommen heute deutschlandweit über
 Transitous, Echtzeit im Rhein-Main-Gebiet vom RMV und für Züge bundesweit von der DB.
 
-> **Beta, Version 0.12.0.** Geprüft mit Tests gegen Live-Daten und im Emulator. Der Alltagstest auf der Uhr läuft
+> **Beta, Version 0.13.0.** Geprüft mit Tests gegen Live-Daten und im Emulator. Der Alltagstest auf der Uhr läuft
 > noch.
 
-![Ansichten](bilder/ansichten-0120.png)
+![Ansichten](bilder/ansichten-0130.png)
 
-*Abfahrten in den vier Ansichten Phosphor weiß und grün, Klar und Papier, teils invertiert und mit hohem Kontrast.*
+*Abfahrten am Hauptbahnhof in den beiden Ansichten Papier und Phosphor, jeweils normal und invertiert.*
 
 ## Was sie kann
 
@@ -21,9 +21,12 @@ Transitous, Echtzeit im Rhein-Main-Gebiet vom RMV und für Züge bundesweit von 
   Fahrten, die wirklich dorthin fahren, samt Ankunftszeit
 - **Strecken**: vom Standort oder einem Favoriten zum Ziel, mit Umstiegen und Fußwegen. Die App zeigt, wann du
   **losgehen** musst
-- **Ankommen um** *(neu)*: Zielzeit wählen, die App zeigt die letzten Verbindungen, mit denen du rechtzeitig da bist
+- **Ankommen um**: Zielzeit wählen, die App zeigt die letzten Verbindungen, mit denen du rechtzeitig da bist
+- **Weitere Fahrten** *(neu)*: frühere und spätere Abfahrten bzw. Verbindungen als Liste. Sitzt du schon im Bus,
+  wählst du hier die laufende Fahrt und startest sie
 - **Aktive Fahrt**: eine Verbindung starten, und die Uhr führt dich Schritt für Schritt durch Losgehen, Einsteigen,
-  nächsten Halt, Aussteigen und Umsteigen. Zeiten und Steigwechsel live
+  nächsten Halt, Aussteigen und Umsteigen. Zeiten und Steigwechsel live. Im Verlauf markiert ein Balken den nächsten
+  Halt, auch mit allen Zwischenhalten
 - **Anschluss wackelt**: Bei einem knappen Umstieg weckt sich die Uhr und fragt nach. Ist der Anschluss weg, sucht
   sie eine neue Verbindung ab dem Umstieg
 - **Früher da**: Gibt es eine Verbindung, die deutlich früher ankommt, schlägt die App sie von selbst vor.
@@ -31,24 +34,21 @@ Transitous, Echtzeit im Rhein-Main-Gebiet vom RMV und für Züge bundesweit von 
 - **Spontan**: Abfahrten und Strecken ab dem Standort, ohne vorher etwas anzulegen
 - **Rückfahrt** mit einem Klick, **20 Favoriten**, Suche an der Uhr per Haltestelle A–Z oder Diktat
 - **Echtzeit**: Verspätungen, Ausfälle, Steig vom RMV, für Züge bundesweit von der **Deutschen Bahn**. Ohne Schlüssel läuft die App mit dem Fahrplan
-- **Vier Ansichten**: Klar, Papier, Phosphor grün und weiß, jeweils auch invertiert und mit hohem Kontrast
-- **Lange Namen** laufen durch, statt abgeschnitten zu werden
+- **Zwei Ansichten**: Papier (fette Systemschrift, Standard) und Phosphor (Pixelschrift), jeweils auch invertiert,
+  Phosphor zusätzlich mit hohem Kontrast
+- **Lange Namen** laufen überall durch, statt abgeschnitten zu werden
 - **Alles an der Uhr einstellbar**, oder bequemer in der Pebble-App am Handy
 
 ## Unterwegs
 
-![Fahrtkarte](bilder/fahrtkarte-0110.png)
+![Fahrt](bilder/fahrt-0130.png)
 
-*Aktive Fahrt in Phosphor: losgehen, jetzt los, im Bus, zwei Halte vor dem Ausstieg.*
+*Aktive Fahrt vom Hauptbahnhof zum Kurhaus, im Bus: Fahrtkarte und Verlauf mit dem Balken auf dem nächsten Halt,
+links Papier, rechts Phosphor.*
 
-<p>
-  <img src="bilder/fahrt-klar-0120.png" width="200" alt="Fahrt in Klar">
-  &nbsp;
-  <img src="bilder/ankommen-0120.png" width="200" alt="Ankommen um">
-</p>
+<img src="bilder/weitere-fahrten-0130.png" width="200" alt="Weitere Fahrten">
 
-*Links dieselbe Fahrt in Klar, rechts **Ankommen um 11:30**: die drei letzten
-passenden Verbindungen, unten die Zielzeit.*
+*Weitere Fahrten: die Auswahl steht auf der nächsten Abfahrt, darüber die eben abgefahrenen.*
 
 ## Installation
 

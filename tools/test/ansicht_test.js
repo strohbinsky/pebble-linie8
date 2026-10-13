@@ -19,18 +19,18 @@ var ctx = { document: { getElementById: function (id) { return id === 'app' ? ap
 vm.createContext(ctx);
 vm.runInContext(html.substring(html.indexOf('<script>') + 8, html.lastIndexOf('</script>')), ctx);
 function klicke(attr) { klick({ target: { getAttribute: function (k) { return attr[k] === undefined ? null : attr[k]; }, value: attr.value, checked: attr.checked, parentNode: null } }); }
-pruefe(/value="klar" checked/.test(app.innerHTML), 'Seite: Klar ist vorausgewählt');
-pruefe(!/value="led"/.test(app.innerHTML), 'Seite: keine LED-Ansicht mehr');
-klicke({ 'data-a': 'layout', value: 'led' });          // alte Angabe: bleibt Klar
+pruefe(/value="papier" checked/.test(app.innerHTML), 'Seite: Papier ist vorausgewählt (0.13.0)');
+pruefe(!/value="led"/.test(app.innerHTML) && !/value="klar"/.test(app.innerHTML) && !/value="phosphor"/.test(app.innerHTML), 'Seite: nur Papier und Phosphor weiß');
+klicke({ 'data-a': 'layout', value: 'led' });          // alte Angabe: wird Papier
 klicke({ 'data-a': 'layout', value: 'klar' });
 klicke({ 'data-a': 'speichern' });
-pruefe(rueck && rueck.layout === 'klar', 'Seite: Rückgabe layout = klar');
+pruefe(rueck && rueck.layout === 'papier', 'Seite: Rückgabe layout = papier (klar wird Papier)');
 pruefe(rueck && rueck.invers === false && rueck.kontrast === false && rueck.schliessen === false, 'Seite: Invertiert, Kontrast, Schließen aus');
 // Farben (0.9.1): zweite Seite, Phosphor weiß, invertiert, hoher Kontrast
 var rueck1 = rueck; rueck = null;
 html = seite.replace('/*ZUSTAND*/null', JSON.stringify({ strecken: [strecke], schrift: schrift.F35, rmvKey: '', unterseite: 'anzeige', layout: 'klar' }));
 vm.runInContext(html.substring(html.indexOf('<script>') + 8, html.lastIndexOf('</script>')), ctx);
-pruefe(/value="klar" checked/.test(app.innerHTML) && /data-a="invers">/.test(app.innerHTML), 'Seite: Klar gewählt, Invertiert aus');
+pruefe(/value="papier" checked/.test(app.innerHTML) && /data-a="invers">/.test(app.innerHTML), 'Seite: alter Stand Klar zeigt Papier, Invertiert aus');
 klicke({ 'data-a': 'layout', value: 'phosphor_weiss' }); klicke({ 'data-a': 'invers', checked: true }); klicke({ 'data-a': 'kontrast', checked: true }); klicke({ 'data-a': 'schliessen', checked: true });
 klicke({ 'data-a': 'speichern' });
 pruefe(rueck && rueck.layout === 'phosphor_weiss' && rueck.invers === true && rueck.kontrast === true && rueck.schliessen === true, 'Seite: Phosphor weiß, invertiert, Kontrast, schließen');
@@ -61,28 +61,28 @@ function warte() { return new Promise(function (r) { setTimeout(r, 30); }); }
 (async function () {
 lauscher.ready();
 await warte();
-pruefe(gesendet[0][keys.LAYOUT] === 1, 'Handy: ohne Einstellung LAYOUT = 1 (Klar)');
+pruefe(gesendet[0][keys.LAYOUT] === 5, 'Handy: ohne Einstellung LAYOUT = 5 (Papier)');
 gesendet = [];
 await warte();
 lauscher.webviewclosed({ response: encodeURIComponent(JSON.stringify(rueck)) });
 await warte();
 var e = gesendet[0];
-pruefe(speicher.layout === 'klar', 'Handy: layout gespeichert');
-pruefe(e[keys.LAYOUT] === 1, 'Handy: Einrichtung mit LAYOUT = 1');
+pruefe(speicher.layout === 'papier', 'Handy: layout gespeichert');
+pruefe(e[keys.LAYOUT] === 5, 'Handy: Einrichtung mit LAYOUT = 5');
 pruefe(e[keys.KLAR_A] === 'Hauptbahnhof' && e[keys.KLAR_B] === 'Luisenplatz', 'Handy: Klar-Namen ' + e[keys.KLAR_A] + ' / ' + e[keys.KLAR_B]);
 pruefe(e[keys.NAME_A] === 'HAUPTBAHNHOF' && e[keys.NAME_B] === 'LUISENPLATZ', 'Handy: Großbuchstaben-Namen, NAME_B = Ziel');
 lauscher.appmessage({ payload: { AKTION: 7, WAHL: 0 } });
 await warte();
-pruefe(speicher.layout === 'klar', 'Handy: alte LED von der Uhr (AKTION 7, WAHL 0) wird Klar');
+pruefe(speicher.layout === 'papier', 'Handy: alte LED von der Uhr (AKTION 7, WAHL 0) wird Papier');
 lauscher.appmessage({ payload: { AKTION: 7, WAHL: 2 } });
 await warte();
-pruefe(speicher.layout === 'phosphor', 'Handy: Phosphor an der Uhr (AKTION 7, WAHL 2) gespeichert');
+pruefe(speicher.layout === 'phosphor_weiss', 'Handy: Phosphor grün von der Uhr (AKTION 7, WAHL 2) wird Phosphor weiß');
 lauscher.appmessage({ payload: { AKTION: 7, WAHL: 3 } });
 await warte();
-pruefe(speicher.layout === 'klar' && speicher.invers === '0', 'Handy: altes LED invers (WAHL 3) wird Klar, nicht invertiert');
+pruefe(speicher.layout === 'papier' && speicher.invers === '0', 'Handy: altes LED invers (WAHL 3) wird Papier, nicht invertiert');
 speicher.layout = 'invers'; delete speicher.invers;
 gesendet = []; lauscher.ready(); await warte();
-pruefe(gesendet[0][keys.LAYOUT] === 1, 'Handy: alter Speicherstand layout=invers sendet LAYOUT = 1 (Klar)');
+pruefe(gesendet[0][keys.LAYOUT] === 5, 'Handy: alter Speicherstand layout=invers sendet LAYOUT = 5 (Papier)');
 lauscher.appmessage({ payload: { AKTION: 7, WAHL: 4 + 8 + 16 } });
 await warte();
 pruefe(speicher.layout === 'phosphor_weiss' && speicher.invers === '1' && speicher.kontrast === '1', 'Handy: Phosphor weiß + invertiert + Kontrast an der Uhr');
@@ -97,7 +97,7 @@ lauscher.appmessage({ payload: { AKTION: 7, WAHL: 2 } });
 await warte();
 gesendet = []; lauscher.ready();
 await warte();
-pruefe(gesendet[0][keys.LAYOUT] === 2, 'Handy: Einrichtung mit LAYOUT = 2 (Phosphor)');
+pruefe(gesendet[0][keys.LAYOUT] === 4, 'Handy: Einrichtung mit LAYOUT = 4 (Phosphor weiß; grün gibt es seit 0.13.0 nicht mehr)');
 pruefe(gesendet[0][keys.NAME_A] === 'HAUPTBAHNHOF', 'Handy: Phosphor nutzt Großbuchstaben-Namen');
 // Seite ohne Ziel (0.50): NAME_B und KLAR_B leer
 speicher.seiten = JSON.stringify([{ a: strecke.a, b: null, linien: ['8'], alle: false }]);

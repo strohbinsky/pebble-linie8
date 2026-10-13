@@ -56,7 +56,8 @@ var e = null;                      // Entwurf der Seite im Editor
 var rmvKey = (ZUSTAND && ZUSTAND.rmvKey) || '';
 var rmvTest = '';
 var dbId = (ZUSTAND && ZUSTAND.dbId) || '', dbKey = (ZUSTAND && ZUSTAND.dbKey) || '', dbTest = '';   // DB Timetables (0.9.0)
-var layout = ['klar', 'phosphor', 'phosphor_weiss', 'papier'].indexOf(ZUSTAND && ZUSTAND.layout) >= 0 ? ZUSTAND.layout : 'klar';   // Ansicht auf der Uhr
+function layoutWahl(v) { return v === 'phosphor' || v === 'phosphor_weiss' ? 'phosphor_weiss' : 'papier'; }   // seit 0.13.0 nur zwei Ansichten
+var layout = layoutWahl(ZUSTAND && ZUSTAND.layout);   // Ansicht auf der Uhr
 var inversWert = !!(ZUSTAND && ZUSTAND.invers), kontrastWert = !!(ZUSTAND && ZUSTAND.kontrast);   // Farben (0.9.1)
 var schliessenWert = !!(ZUSTAND && ZUSTAND.schliessen);   // App nach 10 s ohne Taste zu (0.9.2, Standard aus)
 var umkreisWert = L.UMKREISE.indexOf(ZUSTAND && ZUSTAND.umkreis) >= 0 ? ZUSTAND.umkreis : 1000;   // Umkreis um den Start
@@ -124,7 +125,7 @@ function namenFokus(i) {                 // neuer Favorit: gleich den Namen eint
 function hauptHtml() {
   var kurz = {
     haltestellen: strecken.length + ' von ' + MAXS, strecken: routen.length + ' von ' + MAXR, favoriten: favoriten.length + ' von ' + MAXF,
-    anzeige: { klar: 'Klar', phosphor: 'Phosphor grün', phosphor_weiss: 'Phosphor weiß', papier: 'Papier' }[layout] + (inversWert ? ', invertiert' : '') + (kontrastWert ? ', hoher Kontrast' : '') + (schliessenWert ? ', schließt nach 10 s' : '') + (abfahrtWert === 'aktuell' ? ', Zeit aktuell' : ''),
+    anzeige: { phosphor_weiss: 'Phosphor', papier: 'Papier' }[layout] + (inversWert ? ', invertiert' : '') + (kontrastWert && layout !== 'papier' ? ', hoher Kontrast' : '') + (schliessenWert ? ', schließt nach 10 s' : '') + (abfahrtWert === 'aktuell' ? ', Zeit aktuell' : ''),
     suche: (umstiegeWert === 9 ? 'Umstiege beliebig' : 'höchstens ' + umstiegeWert + ' Umstiege') + ', ' + fusswegWert + ' min Fußweg',
     daten: { auto: 'Auto', rmv: 'nur RMV', trans: 'nur Transitous' }[quelleWert] + (rmvKey ? ' mit RMV-Schlüssel' : ' ohne RMV-Schlüssel') + (dbId && dbKey ? ', DB für Züge' : '') + ', Umkreis ' + kmText(umkreisWert)
   };
@@ -177,16 +178,14 @@ function haltestellenHtml() {
 }
 function anzeigeHtml() {
   return '<h3>Ansicht</h3>' +
-    [['klar', 'Klar', 'Standard. Schwarz auf Weiß, Systemschrift, Linie als rotes Kästchen, Namen mit Umlauten'],
-     ['phosphor', 'Phosphor grün', 'Radar-Grün auf Schwarz, Pixelschrift wie das Watchface Phosphor'],
-     ['phosphor_weiss', 'Phosphor weiß', 'Pixelschrift wie Phosphor, aber weiß'],
-     ['papier', 'Papier', 'Wie Klar, alles fett, kein Grau, große Ziffern — am besten lesbar']].map(function (v) {
+    [['papier', 'Papier', 'Standard. Schwarz auf Weiß, fette Systemschrift, große Ziffern, Namen mit Umlauten — am besten lesbar'],
+     ['phosphor_weiss', 'Phosphor', 'Weiße Pixelschrift auf Schwarz wie das Watchface Phosphor']].map(function (v) {
       return '<label class="zeile"><input type="radio" name="layout" data-a="layout" value="' + v[0] + '"' + (layout === v[0] ? ' checked' : '') + '>' +
         '<b>' + v[1] + '</b><br><span class="klein">' + v[2] + '</span></label>';
     }).join('') +
     '<h3>Farben</h3>' +
-    [['invers', 'Invertiert', 'Dunkle Schrift auf hellem Grund, bei Tageslicht am kontrastreichsten. Klar wird weiß auf Schwarz', inversWert],
-     ['kontrast', 'Hoher Kontrast', 'Keine graue oder blasse Schrift, alles in voller Schriftfarbe. Farbige Hinweise bleiben', kontrastWert],
+    [['invers', 'Invertiert', 'Papier wird weiß auf Schwarz, Phosphor dunkel auf Hell', inversWert],
+     ['kontrast', 'Hoher Kontrast', 'Nur Phosphor (Papier hat nie Grau): keine graue oder blasse Schrift, farbige Hinweise bleiben', kontrastWert],
      ['schliessen', 'App nach 10 s schließen', 'Ohne Tastendruck zurück zum Watchface (nicht beim Laden und in der aktiven Fahrt). Aus: Linie 8 bleibt offen', schliessenWert]].map(function (v) {
       return '<label class="zeile"><input type="checkbox" data-a="' + v[0] + '"' + (v[3] ? ' checked' : '') + '>' +
         '<b>' + v[1] + '</b><br><span class="klein">' + v[2] + '</span></label>';
@@ -669,7 +668,7 @@ document.addEventListener('click', function (ev) {
   }
   if (a === 'hoch' && i > 0) { strecken.splice(i - 1, 0, strecken.splice(i, 1)[0]); vormerken(); return zeigeListe(); }
   if (a === 'runter' && i < strecken.length - 1) { strecken.splice(i + 1, 0, strecken.splice(i, 1)[0]); vormerken(); return zeigeListe(); }
-  if (a === 'layout') { layout = ['klar', 'phosphor', 'phosphor_weiss', 'papier'].indexOf(el.value) >= 0 ? el.value : 'klar'; return vormerken(); }
+  if (a === 'layout') { layout = layoutWahl(el.value); return vormerken(); }
   if (a === 'invers') { inversWert = !!el.checked; return vormerken(); }
   if (a === 'kontrast') { kontrastWert = !!el.checked; return vormerken(); }
   if (a === 'schliessen') { schliessenWert = !!el.checked; return vormerken(); }

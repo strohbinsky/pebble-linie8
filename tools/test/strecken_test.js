@@ -41,7 +41,7 @@ var Pebble = {
     var m = {}; Object.keys(msg).forEach(function (k) { m[namen[k] || k] = msg[k]; });
     if (m.L_ANZAHL !== undefined) {
       if (m.L_ANZAHL < 0) { uhr.liste = null; uhr.ende.push(m.L_ANZAHL); }
-      else uhr.liste = { titel: m.L_TITEL, n: m.L_ANZAHL, texte: [] };
+      else uhr.liste = { titel: m.L_TITEL, n: m.L_ANZAHL, texte: [], sel: m.WAHL || 0 };
     }
     if (m.L_AB !== undefined && uhr.liste) for (var j = 0; j < 10; j++) if (m['L_TEXT[' + j + ']'] !== undefined) uhr.liste.texte[m.L_AB + j] = m['L_TEXT[' + j + ']'];
     if (m.L_LADE !== undefined) uhr.lade.push(m.L_LADE);
@@ -166,7 +166,12 @@ dann(function (w) { warte(function () { return uhr.routen && uhr.routen.anzahl =
 streckeZeigen(0, function (a) { if (!(a.R_N > 0)) fehler('keine Verbindung'); });
 console.log('== 5 Detail Strecke 1, Verbindung 1 (REQUEST mit DETAIL)');
 dann(function (w) { senden({ REQUEST: 0, RUBRIK: 1, DETAIL: 0 }); w(); });
-detailZeigen('1:0', function (d) { if (d.zeilen[0].art !== 1 || d.zeilen[d.n - 1].art !== 3) fehler('Detail beginnt nicht mit START oder endet nicht mit ZIEL'); });
+detailZeigen('1:0', function (d) {
+  if (d.zeilen[0].art !== 1 || d.zeilen[d.n - 1].art !== 3) fehler('Detail beginnt nicht mit START oder endet nicht mit ZIEL');
+  var zw = d.zeilen.filter(function (z) { return z.art === 4; }).length;   // 0.13.0: Strecken zeigen Zwischenhalte
+  console.log('  Zwischenhalte: ' + zw);
+  if (!zw) fehler('Strecke ohne Zwischenhalte (Hbf -> Kurhaus hat welche)');
+});
 console.log('== 6 Neue Strecke mit Umstieg: VON Favorit Luisenplatz, NACH Suche "Mainz Hauptbahnhof"');
 dann(function (w) { aktion(20, -1); w(); });
 erwarte('VON', /^LUISENPL/);
@@ -308,6 +313,40 @@ dann(function (w) {                                  // Puffer künstlich altern
     w();
   });
 });
+
+console.log('== 14 WEITERE FAHRTEN (0.13.0): Liste ab 30 min vorher, Auswahl auf der ersten kommenden, Details, später/früher laden, Fahrt starten');
+var listeN = 0;
+function fahrtenPruefen() {
+  var t = uhr.liste.texte;
+  if (t[0] !== 'FRUEHERE LADEN' || t[t.length - 1] !== 'SPAETERE LADEN') fehler('Laden-Einträge fehlen');
+  if (uhr.liste.n < 4) fehler('zu wenige Fahrten: ' + uhr.liste.n);
+  console.log('  Auswahl ' + uhr.liste.sel + ': ' + t[uhr.liste.sel]);
+  if (uhr.liste.sel < 1 || uhr.liste.sel > t.length - 2) fehler('Auswahl nicht auf einer Fahrt');
+}
+dann(function (w) { senden({ AKTION: 38, WAHL: 0, RUBRIK: 1 }); w(); });
+erwarte('WEITERE FAHRTEN', null, function () { fahrtenPruefen(); listeN = uhr.liste.n; });
+dann(function (w) { var e0 = uhr.ende.length; aktion(5, uhr.liste.sel); warte(function () { return uhr.ende.length > e0; }, function () {
+  if (uhr.ende[uhr.ende.length - 1] !== -7) fehler('Uhr soll Details öffnen (-7), bekommt ' + uhr.ende[uhr.ende.length - 1]); w(); }); });
+dann(function (w) { senden({ REQUEST: 0, RUBRIK: 1, DETAIL: 4 }); w(); });
+detailZeigen('1:0', function (d) { if (d.nr !== 4) fehler('Details nicht als LISTE (4): ' + d.nr); });
+dann(function (w) { senden({ AKTION: 38, WAHL: -1, RUBRIK: 1 }); w(); });
+erwarte('WEITERE FAHRTEN', null, function () { fahrtenPruefen(); });
+dann(function (w) { aktion(5, uhr.liste.n - 1); uhr.liste = null; w(); });   // SPAETERE LADEN
+erwarte('WEITERE FAHRTEN', null, function () { fahrtenPruefen(); console.log('  später: ' + listeN + ' -> ' + uhr.liste.n); if (uhr.liste.n <= listeN) fehler('Spätere nicht dazu'); listeN = uhr.liste.n; });
+dann(function (w) { aktion(5, 0); uhr.liste = null; w(); });                // FRUEHERE LADEN
+erwarte('WEITERE FAHRTEN', null, function () { fahrtenPruefen(); console.log('  früher: ' + listeN + ' -> ' + uhr.liste.n); if (uhr.liste.n <= listeN) fehler('Frühere nicht dazu'); });
+dann(function (w) { var e0 = uhr.ende.length; aktion(6); warte(function () { return uhr.ende.length > e0; }, function () { console.log('  Zurück -> Uhr-Menü (' + uhr.ende[uhr.ende.length - 1] + ')'); w(); }); });
+dann(function (w) { senden({ AKTION: 38, WAHL: 0, RUBRIK: 0 }); w(); });       // Abfahrten: Hbf ohne Ziel
+erwarte('WEITERE FAHRTEN', null, function () { fahrtenPruefen(); console.log(zeige()); });
+dann(function (w) { var e0 = uhr.ende.length; aktion(5, Math.max(1, uhr.liste.sel - 1)); warte(function () { return uhr.ende.length > e0; }, w); });   // eine schon abgefahrene
+dann(function (w) { senden({ REQUEST: 0, RUBRIK: 0, DETAIL: 4 }); w(); });
+detailZeigen('0:0', function (d) { if (d.nr !== 4 || d.n < 2) fehler('Abfahrt-Details aus der Liste fehlen'); });
+dann(function (w) { var e0 = uhr.ende.length; aktion(31, 0); warte(function () { return uhr.ende.length > e0; }, function () {
+  if (uhr.ende[uhr.ende.length - 1] !== -6) fehler('Fahrt aus der Liste starten: ' + uhr.ende[uhr.ende.length - 1]);
+  var a = JSON.parse(speicher.aktiv); console.log('  aktiv aus der Liste: ' + a.art + ' ' + a.f.linie + ' ab ' + hmZ(a.f.ab) + ' nach ' + a.titel.klar); w(); }); });
+dann(function (w) { senden({ REQUEST: 0, RUBRIK: 2, DETAIL: 0 }); w(); });
+detailZeigen('2:0', function (d) { console.log('  markiert: Zeile ' + d.akt + (d.zeilen[d.akt] ? ' ' + d.zeilen[d.akt].text : '')); if (!(d.akt >= 0)) fehler('kein Balken'); });
+dann(function (w) { aktion(32, 0); setTimeout(w, 300); });
 
 function fertig() {
   console.log('\nOK in ' + Math.round((Date.now() - t0) / 1000) + ' s, ' + X.zaehler.n + ' Abfragen, größte Nachricht ' + uhr.groesste + ' Bytes');

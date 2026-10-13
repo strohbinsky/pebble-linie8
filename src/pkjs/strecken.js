@@ -151,8 +151,29 @@ function Strecken(hilfe) {
   function halteText(n, t) { return n === 1 ? t.T('1 HALT', '1 Halt') : n + t.T(' HALTE', ' Halte'); }
   function sep(t) { return t.T(' ', ' · '); }            // LED-Schrift hat keinen Mittelpunkt
 
-  function detailVerbindung(v, t, vonName, nachName, minUmstieg) {
+  // Zwischenhalte je Abschnitt (0.13.0; bis 0.12.0 zeigten Strecken und FRUEHER DA keine). Passt nicht alles in frei
+  // Zeilen: erst die schon passierten weg (eine Zeile "… 4 vorbei"), dann hinten kürzen ("+ 3 weitere").
+  function zwischenWahl(legs, t, frei, jetzt) {
+    var zw = legs.map(function (l) { return l.fuss ? [] : (l.zwischen || []).slice(); });
+    function summe() { return zw.reduce(function (n, x) { return n + x.length; }, 0); }
+    if (summe() > frei) zw = zw.map(function (x) {
+      var r = x.filter(function (h) { return !h.t || h.t >= jetzt - 30; });
+      if (r.length < x.length) r.unshift({ name: null, text: t.T('', '… ') + (x.length - r.length) + t.T(' VORBEI', ' vorbei') });
+      return r;
+    });
+    for (var i = 0, rest = Math.max(0, frei); i < zw.length; i++) {
+      if (zw[i].length > rest) {
+        var weg = zw[i].length - Math.max(0, rest - 1);
+        zw[i] = rest > 0 ? zw[i].slice(0, rest - 1).concat([{ name: null, text: t.T('+', '+ ') + weg + t.T(' WEITERE', ' weitere') }]) : [];
+      }
+      rest -= zw[i].length;
+    }
+    return zw;
+  }
+
+  function detailVerbindung(v, t, vonName, nachName, minUmstieg, max, jetzt) {
     var z = [], legs = v.legs, um = umstiege(v), ui = 0, akt = 0;
+    var ohne = 1 + legs.length * 3, zw = zwischenWahl(legs, t, (max || 40) - ohne, jetzt || Math.floor(Date.now() / 1000));
     function zeile(art, zeit, text, zus, re) { z.push({ art: art, t: zeit || 0, text: text || '', zus: zus || '', re: re || '', leg: akt }); }
     var erste = legs[0];
     if (erste.fuss) zeile(Z.START, v.los, vonName);
@@ -185,6 +206,7 @@ function Strecken(hilfe) {
       if (l.ausfall) zus = t.T('FAELLT AUS', 'fällt aus');
       else if (l.del) zus = (l.del > 0 ? '+' : '') + l.del + "'" + sep(t) + zus;
       zeile(Z.FAHRT + (l.ausfall || l.del > 0 ? Z.WARN : 0), 0, hilfe.linienVoll(l.linie) + ' > ' + t.name(l.richtung), zus);
+      zw[i].forEach(function (h) { zeile(Z.ZWISCHEN, h.name ? h.t : 0, h.name ? t.name(h.name) : h.text); });
       zeile(letzte ? Z.ZIEL : Z.HALT, l.an, letzte && nachName ? nachName : t.name(l.nach), '', l.nachSteig);
     }
     return z;

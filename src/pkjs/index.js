@@ -85,12 +85,13 @@ function steigText(s) {
   return teile[teile.length - 1].substring(0, 3);
 }
 
-function holen(von, nach, linien, fertig, max) {   // max: so viele Fahrten (Standard MAXD, Bezugssuche mehr)
+// max: so viele Fahrten (Standard MAXD, Bezugssuche mehr); ab: Abfahrten ab dieser Zeit (UTC, WEITERE FAHRTEN), sonst ab jetzt
+function holen(von, nach, linien, fertig, max, ab) {
   var url = PLAN +
     '?fromPlace=' + encodeURIComponent(von) +
     '&toPlace=' + encodeURIComponent(nach) +
-    '&maxTransfers=0&numItineraries=10&directModes=WALK' +
-    '&maxPreTransitTime=0&maxPostTransitTime=0';
+    '&maxTransfers=0&numItineraries=' + Math.max(10, max || 0) + '&directModes=WALK' +
+    '&maxPreTransitTime=0&maxPostTransitTime=0' + (ab ? '&time=' + new Date(ab * 1000).toISOString() : '');
   var erledigt = false;
   function ende(fehler, erg) { if (!erledigt) { erledigt = true; fertig(fehler, erg); } }
 
@@ -190,7 +191,11 @@ function deZuUtc(datum, zeit) {
   return naiv - 3600;
 }
 
-function holenRmv(von, nach, linien, fertig, max) {
+function rmvAb(t) {                    // '&date=…&time=…' in deutscher Zeit für RMV-Abfragen ab t (UTC)
+  var dz = new Date((t + mezVersatz(t)) * 1000).toISOString();
+  return '&date=' + dz.slice(0, 10) + '&time=' + dz.slice(11, 16);
+}
+function holenRmv(von, nach, linien, fertig, max, ab) {
   rmvKennung(von, function (f1, a) {
     if (f1 !== null) return fertig(f1);
     rmvKennung(nach, function (f2, b) {
@@ -198,7 +203,7 @@ function holenRmv(von, nach, linien, fertig, max) {
       // Linie gleich bei RMV filtern: ohne Filter sind die 6 Fahrten an großen Haltestellen oft fremde Linien,
       // die gewählte fehlt dann ganz (Hbf -> CongressCenter: 1 von 6 ist eine 4). Unbekannte Linie -> HTTP 400 -> Fehler.
       var filter = (linien && linien.length) ? '&lines=' + encodeURIComponent(linien.join(',')) : '';
-      rmvGet('trip?maxChange=0&numF=6&passlist=1' + filter + '&originExtId=' + encodeURIComponent(a) + '&destExtId=' + encodeURIComponent(b), function (f, d) {
+      rmvGet('trip?maxChange=0&numF=6&passlist=1' + filter + (ab ? rmvAb(ab) : '') + '&originExtId=' + encodeURIComponent(a) + '&destExtId=' + encodeURIComponent(b), function (f, d) {
         if (f !== null) return fertig(f);
         try {
           var liste = [], live = false, gesehen = {};
@@ -250,8 +255,8 @@ function holenRmv(von, nach, linien, fertig, max) {
 // ---------- Seite ohne Ziel: alle Abfahrten der Haltestelle (seit 0.50) ----------
 // Je Fahrt zusätzlich das Endziel (z). "über …" liefert keine der beiden Quellen (geprüft 2026-10-09), daher nur das Endziel.
 var TAFEL_N = 60;      // so viele Abfahrten ansehen, bevor der Linienfilter greift (Hbf: 25 Linien)
-function tafelTransitous(von, linien, fertig) {
-  transitousHolen('v5/stoptimes?stopId=' + encodeURIComponent(von.id) + '&n=' + TAFEL_N, function (f, d) {
+function tafelTransitous(von, linien, fertig, ab, max) {
+  transitousHolen('v5/stoptimes?stopId=' + encodeURIComponent(von.id) + '&n=' + TAFEL_N + (ab ? '&time=' + new Date(ab * 1000).toISOString() : ''), function (f, d) {
     if (f) return fertig(f === 'kein Netz' ? STATUS_NETZ : STATUS_FEHLER);
     try {
       var liste = [], live = false;
@@ -270,7 +275,7 @@ function tafelTransitous(von, linien, fertig) {
         live = live || !!x.realTime;
       });
       liste.sort(function (a, b) { return a.t - b.t; });
-      fertig(null, { fahrten: liste.slice(0, MAXD), live: live });
+      fertig(null, { fahrten: liste.slice(0, max || MAXD), live: live });
     } catch (e) {
       console.log('Abfahrten unlesbar: ' + e);
       fertig(STATUS_FEHLER);
@@ -278,11 +283,11 @@ function tafelTransitous(von, linien, fertig) {
   });
 }
 
-function tafelRmv(von, linien, fertig) {
+function tafelRmv(von, linien, fertig, ab, max) {
   rmvKennung(von, function (f1, a) {
     if (f1 !== null) return fertig(f1);
     var filter = (linien && linien.length) ? '&lines=' + encodeURIComponent(linien.join(',')) : '';
-    rmvGet('departureBoard?maxJourneys=30&duration=120' + filter + '&id=' + encodeURIComponent(a), function (f, d) {
+    rmvGet('departureBoard?maxJourneys=30&duration=120' + filter + (ab ? rmvAb(ab) : '') + '&id=' + encodeURIComponent(a), function (f, d) {
       if (f !== null) return fertig(f);
       try {
         var liste = [], live = false;
@@ -299,7 +304,7 @@ function tafelRmv(von, linien, fertig) {
           live = live || rt;
         });
         liste.sort(function (x, y) { return x.t - y.t; });
-        fertig(null, { fahrten: liste.slice(0, MAXD), live: live });
+        fertig(null, { fahrten: liste.slice(0, max || MAXD), live: live });
       } catch (e) {
         console.log('RMV-Abfahrten unlesbar: ' + e);
         fertig(STATUS_FEHLER);
@@ -420,27 +425,26 @@ function umkreis() {
 }
 function umkreisText(m) { return m >= 1000 ? (m / 1000) + T('KM', ' km') : m + T('M', ' m'); }
 
-// Ansicht: 'klar' (Standard seit 0.12.0), 'phosphor' (grün), 'phosphor_weiss' (seit 0.9.1) oder 'papier' (0.10.0), dazu
-// unabhängig 'invers' (dunkle Schrift auf hellem Grund, Klar umgekehrt) und 'kontrast' (keine graue Schrift).
-// LED ('led', bis 0.9.0 auch 'invers' als eigene Ansicht) gibt es seit 0.12.0 nicht mehr: wird Klar, nicht invertiert.
-// Phosphor nutzt die Großbuchstaben-Texte ohne Umlaute, Klar und Papier die normale Schreibweise.
-var LAYOUTS = ['led', 'klar', 'phosphor', 'invers', 'phosphor_weiss', 'papier'];   // Index = Grundansicht in LAYOUT; 0 und 3 nur alt
-function altLed() { var v = localStorage.getItem('layout'); return v === 'led' || v === 'invers' || LAYOUTS.indexOf(v) < 0; }
-function layout() { return altLed() ? 'klar' : localStorage.getItem('layout'); }
+// Ansicht seit 0.13.0: 'papier' (Standard) oder 'phosphor_weiss', dazu unabhängig 'invers' (Papier dunkel, Phosphor hell)
+// und 'kontrast' (keine graue Schrift, nur Phosphor). Alte Werte: 'phosphor' (grün) wird Phosphor weiß; 'klar', 'led'
+// und 'invers' (LED invers als eigene Ansicht bis 0.9.0) werden Papier — LED-Stände dabei nicht invertiert.
+// Phosphor nutzt die Großbuchstaben-Texte ohne Umlaute, Papier die normale Schreibweise.
+var LAYOUTS = ['led', 'klar', 'phosphor', 'invers', 'phosphor_weiss', 'papier'];   // Index = Wert in LAYOUT; gesendet nur noch 4 und 5
+function altLed() { var v = localStorage.getItem('layout'); return v === 'led' || v === 'invers'; }
+function layout() { var v = localStorage.getItem('layout'); return v === 'phosphor' || v === 'phosphor_weiss' ? 'phosphor_weiss' : 'papier'; }
 function invers() { return !altLed() && localStorage.getItem('invers') === '1'; }
 function kontrast() { return localStorage.getItem('kontrast') === '1'; }
 function schliessen() { return localStorage.getItem('schliessen') === '1'; }   // App nach 10 s ohne Taste zu (0.9.2, Standard aus)
 // LAYOUT an der Uhr: Grundansicht + 8 invertiert + 16 hoher Kontrast + 32 App schließen
 function layoutWert() { return LAYOUTS.indexOf(layout()) | (invers() ? 8 : 0) | (kontrast() ? 16 : 0) | (schliessen() ? 32 : 0); }
 function layoutMerken(w) {
-  var b = w & 7;
-  var led = b === 0 || b === 3 || !LAYOUTS[b];
-  localStorage.setItem('layout', led ? 'klar' : LAYOUTS[b]);
+  var b = w & 7, led = b === 0 || b === 3;
+  localStorage.setItem('layout', b === 2 || b === 4 ? 'phosphor_weiss' : 'papier');
   localStorage.setItem('invers', !led && (w & 8) ? '1' : '0');
   localStorage.setItem('kontrast', w & 16 ? '1' : '0');
   localStorage.setItem('schliessen', w & 32 ? '1' : '0');
 }
-function T(led, klar) { return layout() === 'klar' || layout() === 'papier' ? klar : led; }   // Text je nach Ansicht
+function T(led, klar) { return layout() === 'papier' ? klar : led; }   // Text je nach Ansicht
 
 // Quelle der Abfahrten (seit 0.35): 'auto' (Standard: RMV mit Schlüssel, bei Fehler Transitous), 'rmv' (nur RMV,
 // Fehler bleibt Fehler — auch ohne Schlüssel), 'trans' (nur Transitous). Einstellbar an Seite und Uhr.
@@ -574,6 +578,7 @@ function abfahrtenLaden(st, i, extra, kanal, detail) {
       return x ? (x.an || (x.f ? x.t + x.f * 60 : 0)) : 0;
     });
     if (detail === VORSCHLAG) return vorschlagDetailSenden(0, i);
+    if (detail === LISTE) return fahrtenDetailSenden(0, i);
     if (erg && mitDetail !== false && detail !== undefined && detail >= 0) detailAbfahrtSenden(st, i, erg.fahrten, detail, quelle, function () { return nr !== ladeNrn[kanal]; }, stand || jetztS());
   }
   if (p) {                               // gepuffert: sofort zeigen; frisch genug -> fertig
@@ -658,6 +663,7 @@ Pebble.addEventListener('appmessage', function (e) {
   var aktion = wert(p, 'AKTION'), rub = wert(p, 'RUBRIK'), det = wert(p, 'DETAIL');
   if (det === undefined) det = -1;
   localStorage.setItem('offen', String(jetztS()));
+  if (ablauf && ablauf.fahrten && aktion === undefined && det !== LISTE) ablauf = null;   // WEITERE FAHRTEN verlassen
   if (aktion !== undefined) return menueAktion(aktion, wert(p, 'WAHL') || 0, p, det);
   if (rub === RUBRIK_FAHRT) return fahrtSenden();
   var s = wert(p, 'REQUEST');
@@ -708,7 +714,8 @@ var L = Logik(transitousHolen, SCHRIFT.F35);
 var ablauf = null;     // laufender Menü-Ablauf: { ziel, rueck, schritte[], a, linie, erg, b, extra, genau, gen }
 
 // frage: Bitmaske der Einträge, die an der Uhr die Bestätigungsseite brauchen (0.8.0); summen: Uhr vibriert (Vorschlag)
-function listeSenden(titel, texte, info, frage, summen) {
+// sel: Eintrag, auf dem die Auswahl steht (sonst der erste; WEITERE FAHRTEN: die erste kommende, 0.13.0)
+function listeSenden(titel, texte, info, frage, summen, sel) {
   schlange = schlange.filter(function (x) { return !x.liste; });   // Blöcke einer veralteten Liste verwerfen
   var n = Math.min(texte.length, MAXL);
   for (var ab = 0; ab === 0 || ab < n; ab += BLOCK) {
@@ -717,6 +724,7 @@ function listeSenden(titel, texte, info, frage, summen) {
       msg[keys.L_TITEL] = L.utf8Kuerzen(titel, LTXT); msg[keys.L_ANZAHL] = n; msg[keys.L_INFO] = L.utf8Kuerzen((info || []).join('|'), 127);
       if (frage) msg[keys.L_FRAGE] = frage;
       if (summen) msg[keys.L_SUMMEN] = 1;
+      if (sel) msg[keys.WAHL] = sel;
     }
     msg[keys.L_AB] = ab;
     for (var j = 0; j < BLOCK && ab + j < n; j++) msg[keys.L_TEXT + j] = L.utf8Kuerzen(texte[ab + j], LTXT);
@@ -738,7 +746,7 @@ function menueEnde(anzeige) {           // zurück ins Uhr-Menü; anzeige: gleic
 function schrittZeigen() {
   var s = ablauf.schritte[ablauf.schritte.length - 1], frage = 0;
   s.eintraege.forEach(function (x, i) { if (x.frage && i < 31) frage |= 1 << i; });   // Eintrag mit frage: Bestätigung an der Uhr
-  listeSenden(s.titel, s.eintraege.map(function (x) { return x.t; }), s.info, frage, s.summen);
+  listeSenden(s.titel, s.eintraege.map(function (x) { return x.t; }), s.info, frage, s.summen, s.sel);
   s.summen = false;                      // nur beim ersten Zeigen vibrieren
 }
 
@@ -1189,6 +1197,7 @@ function menueAktion2(aktion, wahl, p, det) {
   if (aktion === A_VERPASST) return verpasstWaehlen();
   if (aktion === A_FAHRT_ENDE) { aktivSchreiben(null); senden(fahrtNachricht(null)); console.log('Fahrt beendet'); return menueEnde(true); }
   if (aktion === A_HIER) return hierLaden(wahl, det);
+  if (aktion === A_FAHRTEN) return fahrtenListe(wert(p, 'RUBRIK') === 1 ? 1 : 0, wahl);
   if (!ablauf) return menueEnde();
   if (aktion === A_ZURUECK && ablauf.frage !== undefined) {   // Frage weggedrückt: in 2 min wieder fragen
     var af = aktivLesen();
@@ -1267,9 +1276,160 @@ function vorschlagDetailSenden(rub, i) {
   var x = vorschlaege[rub + ':' + i], v = x && x.v;
   if (!v) return detailSenden(rub, i, VORSCHLAG, []);
   var erste = v.legs.filter(function (l) { return !l.fuss; })[0], stadt = L.stadtVon(erste ? erste.von : '');
-  detailSenden(rub, i, VORSCHLAG, StreckenM.detailVerbindung(v, textHilfe(stadt), T('HIER', 'Hier'), TT(x.nach), umstzeit()), undefined, x.t);
+  detailSenden(rub, i, VORSCHLAG, StreckenM.detailVerbindung(v, textHilfe(stadt), T('HIER', 'Hier'), TT(x.nach), umstzeit(), DMAX), undefined, x.t);
   letztesDetail = { rubrik: rub, art: 'route', v: v, stadt: stadt, ziel: x.ziel ? { lat: x.ziel.lat, lon: x.ziel.lon } : null,
                     von: { led: 'HIER', klar: 'Hier' }, nach: x.nach, titel: x.nach };
+}
+
+// ---------- Weitere Fahrten (0.13.0) ----------
+// Wunsch Seb 2026-10-13: im Bus saß er schon und konnte die eigene Fahrt nicht mehr wählen (sie stand nicht mehr auf
+// der Seite). Menü der Seite > WEITERE FAHRTEN: bis zu 6 Fahrten der letzten 30 min und 12 kommende, frisch geholt (mit
+// Echtzeit, ohne Puffer; zwei Abfragen, sonst füllen an großen Haltestellen die abgefahrenen die Liste); die Auswahl steht
+// auf der ersten kommenden. Oben FRUEHERE LADEN, unten SPAETERE LADEN holen weitere dazu.
+// Wahl -> Details wie auf der Seite (DETAIL = LISTE), dort Select -> FAHRT STARTEN. Zurück aus den Details: die Liste.
+var LISTE = 4, A_FAHRTEN = 38;          // wie LISTE und A_FAHRTEN in main.c
+var FAHRTEN_VOR_S = 1800, FAHRTEN_VOR_N = 6, FAHRTEN_SCHRITT_S = 3600, FAHRTEN_N = 12, FAHRTEN_MAX = 60;
+var fahrtenWahl = null;                 // { rub, seite, o, x, q, stand }: gewählte Fahrt, Grundlage der Details mit LISTE
+
+function fahrtenObjekt(rub, i) {        // Seite i der Rubrik: Abfahrten-Seite bzw. Strecke (HIER: die Sofort-Ansicht)
+  if (rub === 1) return i === HIER ? (sofortAktuell ? { von: null, nach: sofortAktuell } : null) : routen()[i] || null;
+  return i === HIER ? (hierAktuell ? { a: halt(hierAktuell), b: null, alle: true, linien: [] } : null) : strecken()[i] || null;
+}
+function abfahrtZeit(x) { return x.t; }
+function verbindungZeit(v) { return v.los; }
+// Abfahrten der Seite st ab Zeit ab; Quelle wie auf der Seite (Auto: RMV, bei Fehler Transitous). fertig(fehler, liste, quelle)
+function abfahrtenAb(st, ab, fertig) {
+  var linien = linienFuer(st), q = quelle();
+  function trans() {
+    function cb(f, erg) { fertig(f, erg ? erg.fahrten : null, 'TRANS'); }
+    if (st.b) holen(st.a.id, st.b.id, linien, cb, FAHRTEN_N, ab); else tafelTransitous(st.a, linien, cb, ab, FAHRTEN_N);
+  }
+  if (q === 'trans' || (q === 'auto' && !rmvSchluessel())) return trans();
+  if (!rmvSchluessel()) return fertig(STATUS_FEHLER, null, 'RMV');
+  function rmv(f, erg) {
+    if (f === null) return fertig(null, erg.fahrten, 'RMV');
+    if (q === 'rmv') return fertig(f, null, 'RMV');
+    trans();
+  }
+  if (!st.b) return tafelRmv(st.a, linien, rmv, ab, FAHRTEN_N);
+  // RMV-Trip liefert je Abfrage höchstens 6 Fahrten: weiter ab der letzten, höchstens dreimal
+  var alle = [], live = false, runde = 0;
+  (function weiter(t) {
+    holenRmv(st.a, st.b, linien, function (f, erg) {
+      if (f !== null) return alle.length ? rmv(null, { fahrten: alle, live: live }) : rmv(f);
+      var neu = erg.fahrten.filter(function (x) { return !alle.some(function (y) { return abfahrtKennung(y) === abfahrtKennung(x); }); });
+      alle = alle.concat(neu); live = live || erg.live;
+      var letzte = alle[alle.length - 1];
+      if (alle.length >= FAHRTEN_N || !neu.length || ++runde >= 3) return rmv(null, { fahrten: alle.slice(0, FAHRTEN_N), live: live });
+      weiter(letzte.t - (letzte.d === AUSFALL ? 0 : letzte.d) * 60 + 60);
+    }, 99, t);
+  })(ab);
+}
+// Verbindungen der Strecke r ab Zeit ab (fester Start oder Standort), bis FAHRTEN_N. fertig(fehler, liste, quelle)
+function verbindungenAb(r, ab, fertig) {
+  startOrt(r, function (von) {
+    if (!von) return fertig('standort');
+    var alle = [], runde = 0, qq = '';
+    (function weiter(t) {
+      verbindungenHolen(von, r.nach, function (f, liste, q) {
+        if (f !== null) return alle.length ? fertig(null, alle, qq) : fertig(f, null, q);
+        qq = q;
+        var neu = liste.filter(function (v) { return v && !v.nurFuss && !alle.some(function (w) { return StreckenM.kennung(w) === StreckenM.kennung(v); }); });
+        alle = alle.concat(neu).sort(function (a, b) { return a.los - b.los; });
+        if (alle.length >= FAHRTEN_N || !neu.length || ++runde >= 3) return fertig(null, alle, qq);
+        weiter(alle[alle.length - 1].los + 60);
+      }, 0, t);
+    })(ab);
+  });
+}
+function verzText(d) { return d === AUSFALL ? '' : d ? ' ' + (d > 0 ? '+' : '') + d + "'" : ''; }
+// Listenzeile: "09:26 +2' · 8 · an 09:39" (Ziel) bzw. "09:26 · 8 · Eigenheim" (ohne Ziel); Strecke "09:20-09:51 · 8 > S1"
+function fahrtZeile(rub, x, o) {
+  var sep = T(' ', ' · ');
+  if (rub === 1) {
+    var erste = x.legs.filter(function (l) { return !l.fuss; })[0], d = erste ? (erste.ausfall ? AUSFALL : erste.del) : 0;
+    return hm(x.los) + '-' + hm(x.an) + verzText(d) + sep + (d === AUSFALL ? T('FAELLT AUS', 'fällt aus') + sep : '') + StreckenM.kette(x);
+  }
+  var plan = x.t - (x.d === AUSFALL ? 0 : x.d) * 60, stadt = L.stadtVon(o.a.name);
+  var rest = x.d === AUSFALL ? T('FAELLT AUS', 'fällt aus') : o.b ? (x.an ? T('AN ', 'an ') + hm(x.an) : '') : nameT(x.z || x.r || '', stadt);
+  return hm(plan) + verzText(x.d) + sep + x.l + (rest ? sep + rest : '');
+}
+function fahrtenListe(rub, i) {
+  if (i < 0) {                          // aus den Details zurück: dieselbe Liste, Auswahl auf der gewählten Fahrt
+    if (ablauf && ablauf.fahrten) { ablauf.laedt = false; return schrittZeigen(); }
+    if (!fahrtenWahl) return menueEnde();
+    rub = fahrtenWahl.rub; i = fahrtenWahl.seite;
+  }
+  var o = fahrtenObjekt(rub, i);
+  if (!o) return menueEnde();
+  neuerAblauf(-1);
+  ablauf.fahrten = { rub: rub, seite: i, o: o, liste: [], q: '', stand: 0 };
+  fahrtenLaden(jetztS(), 0);
+}
+function fahrtenLaden(ab, richtung) {   // richtung 0: neu (ab = jetzt), -1: frühere vor ab, 1: spätere ab ab
+  var F = ablauf.fahrten, zeit = F.rub === 1 ? verbindungZeit : abfahrtZeit, kenn = F.rub === 1 ? StreckenM.kennung : abfahrtKennung;
+  var hole = F.rub === 1 ? function (t, cb) { verbindungenAb(F.o, t, cb); } : function (t, cb) { abfahrtenAb(F.o, t, cb); };
+  var fertig = aktuell(function (f, liste, q) {
+    if (f !== null && f !== undefined) return fehlerSchritt(f === STATUS_NETZ ? 'kein Netz' : f, function () { fahrtenLaden(ab, richtung); });
+    var alt = F.liste, frisch = (liste || []).filter(function (x) { return !alt.some(function (y) { return kenn(y) === kenn(x); }); });
+    var neu = richtung === 0 ? frisch.filter(function (x) { return zeit(x) < ab - 60; }).slice(-FAHRTEN_VOR_N)          // abgefahrene
+                                 .concat(frisch.filter(function (x) { return zeit(x) >= ab - 60; }).slice(0, FAHRTEN_N))   // kommende
+            : richtung < 0 ? frisch.filter(function (x) { return zeit(x) < ab; }).slice(-FAHRTEN_N)
+            : frisch.filter(function (x) { return zeit(x) >= ab; }).slice(0, FAHRTEN_N);
+    F.liste = alt.concat(neu).sort(function (a, b) { return zeit(a) - zeit(b); });
+    if (F.liste.length > FAHRTEN_MAX) F.liste = richtung < 0 ? F.liste.slice(0, FAHRTEN_MAX) : F.liste.slice(-FAHRTEN_MAX);
+    F.q = q || F.q; F.stand = jetztS();
+    // Auswahl: neu die erste kommende, früher die letzte neue vor der alten Liste, später die erste neue dahinter
+    var k = -1;
+    F.liste.forEach(function (x, n) { if (k < 0 && (richtung < 0 ? kenn(x) === kenn(alt[0] || x) : zeit(x) >= ab - (richtung === 0 ? 60 : 0))) k = n; });
+    if (richtung < 0) k = Math.max(0, k - 1);
+    if (k < 0) k = Math.max(0, F.liste.length - 1);
+    console.log('Weitere Fahrten: ' + F.liste.length + ' (' + neu.length + ' neu, ' + F.q + '), Auswahl ' + (k + 1));
+    var eintraege = [{ t: T('FRUEHERE LADEN', 'Frühere laden'), mehr: -1 }].concat(F.liste.map(function (x) { return { t: fahrtZeile(F.rub, x, F.o), x: x }; }),
+                    [{ t: T('SPAETERE LADEN', 'Spätere laden'), mehr: 1 }]);
+    ablauf.schritte = [];
+    schritt(T('WEITERE FAHRTEN', 'Weitere Fahrten'), eintraege, function (e) {
+      var j = jetztS();
+      if (e.mehr) return fahrtenLaden(e.mehr < 0 ? (F.liste.length ? zeit(F.liste[0]) : j) : (F.liste.length ? zeit(F.liste[F.liste.length - 1]) + 60 : j), e.mehr);
+      ablauf.laedt = false;
+      ablauf.schritte[0].sel = eintraege.indexOf(e);
+      fahrtenWahl = { rub: F.rub, seite: F.seite, o: F.o, x: e.x, q: F.q, stand: F.stand };
+      var m = {}; m[keys.L_TITEL] = ''; m[keys.L_ANZAHL] = -7; senden(m, true);   // Uhr öffnet die Details (LISTE)
+    });
+    ablauf.schritte[0].sel = k + 1;     // +1: FRUEHERE LADEN steht oben
+    schrittZeigen();
+  });
+  ladeSenden(T('LADE FAHRTEN', 'Lade Fahrten'), true);
+  if (richtung > 0) return hole(ab, fertig);
+  // Fahrten unmittelbar vor bis, lückenlos: Fenster w; reicht die Antwort nicht bis bis (dichte Haltestelle, die Abfrage
+  // liefert nur FAHRTEN_N), noch einmal mit einem Drittel des Fensters
+  function holeVor(bis, w, cb, versuche) {
+    hole(bis - w, function (f, liste, q) {
+      if (f !== null && f !== undefined) return cb(f, null, q);
+      var l = liste || [], reicht = !l.length || zeit(l[l.length - 1]) >= bis - 60;
+      if (!reicht && versuche > 0) return holeVor(bis, Math.round(w / 3), cb, versuche - 1);
+      cb(null, l.filter(function (x) { return zeit(x) < bis; }), q);
+    });
+  }
+  if (richtung < 0) return holeVor(ab, FAHRTEN_SCHRITT_S, fertig, 2);
+  // neu: die letzten 30 min und ab jetzt, beide Antworten zusammen
+  var teile = [], offen = 2, q0 = '', f0 = null;
+  function teil(f, liste, q) {
+    if (f !== null && f !== undefined) f0 = f; else { teile = teile.concat(liste || []); q0 = q || q0; }
+    if (--offen) return;
+    var gesehen = {};
+    teile = teile.filter(function (x) { var k2 = kenn(x); if (gesehen[k2]) return false; gesehen[k2] = true; return true; }).sort(function (a, b) { return zeit(a) - zeit(b); });
+    fertig(teile.length ? null : (f0 || null), teile, q0);
+  }
+  holeVor(ab - 60, FAHRTEN_VOR_S, teil, 2);
+  hole(ab - 60, teil);
+}
+// Details der in der Liste gewählten Fahrt; kommt mit jeder Seitenabfrage mit DETAIL = LISTE (jede Minute neu)
+function fahrtenDetailSenden(rub, seite) {
+  var w = fahrtenWahl;
+  if (!w || w.rub !== rub || w.seite !== seite) return detailSenden(rub, seite, LISTE, []);
+  if (rub === 0) return detailAbfahrtSenden(w.o, seite, [w.x], 0, w.q, function () { return false; }, w.stand, LISTE);
+  routeDetailSenden(w.o, seite, LISTE, w.x, w.stand);
 }
 
 // ---------- Abfahrten hier (seit 0.51) ----------
@@ -1312,7 +1472,8 @@ function hierLaden(k, detail) {
 // Zeilen von oben nach unten (Art, Zeit, Text, Zusatz, Steig), in Blöcken zu 8 an die Uhr (D_AB, D_N im ersten Block).
 // Welche Abfahrt bzw. Verbindung: die Nummer von der Uhr; wird nur neu geladen (gleiche Nummer wie zuletzt), zählt die
 // Kennung (Linie + Planzeit), damit die Ansicht nicht auf die nächste springt, sobald die erste abgefahren ist.
-var DBLOCK = 8, DMAX = 24;       // muss zu D_ART[8] in package.json und DMAX in main.c passen
+var DBLOCK = 8, DMAX = 40;       // muss zu D_ART[8] in package.json und DMAX in main.c passen (0.13.0: 24 -> 40)
+var DTXT = 47;                   // Bytes je Detailtext, Puffer 48 auf der Uhr (bis 0.12.0: 27, lange Halte kamen gekürzt an)
 var gezeigt = {};                // 'rubrik:seite' -> { nr, kennung }
 function detailWahl(schl, liste, nr, kennungVon) {
   var g = gezeigt[schl], k = Math.max(0, Math.min(liste.length - 1, nr));
@@ -1333,7 +1494,7 @@ function detailSenden(rub, seite, nr, zeilen, akt, stand) {   // stand: wann die
     for (var j = 0; j < DBLOCK && ab + j < zeilen.length; j++) {
       var z = zeilen[ab + j];
       m[keys.D_ART + j] = z.art; m[keys.D_ZEIT + j] = z.t || 0;
-      m[keys.D_TEXT + j] = L.utf8Kuerzen(z.text, 27); m[keys.D_ZUS + j] = L.utf8Kuerzen(z.zus, 27); m[keys.D_RE + j] = L.utf8Kuerzen(z.re, 3);
+      m[keys.D_TEXT + j] = L.utf8Kuerzen(z.text, DTXT); m[keys.D_ZUS + j] = L.utf8Kuerzen(z.zus, DTXT); m[keys.D_RE + j] = L.utf8Kuerzen(z.re, 3);
     }
     senden(m);
   }
@@ -1382,6 +1543,7 @@ function fahrtStarten(rub) {
   if (a.art === 'route') a.planEnde = planEnde(a.v);
   a.ende = fahrtEnde(a);
   aktivSchreiben(a);
+  ablauf = null;                         // auch aus WEITERE FAHRTEN: Liste ist erledigt, Fragen der Fahrt dürfen kommen
   localStorage.setItem('ankunft', '');   // Ankommen um erledigt (0.11.0)
   console.log('Fahrt gestartet: ' + a.titel.klar + ' bis ' + hm(a.ende));
   senden(fahrtNachricht(a));
@@ -1620,7 +1782,14 @@ function aktZeile(z, ph, v) {          // welche Detailzeile im Verlauf markiert
     var vor = ph.T[ph.k - 1];
     r = f(function (x, a) { return a === 12 && x.leg > vor && x.leg <= li; });
     if (r < 0) r = f(function (x, a) { return x.leg === li && a === 2; });
-  } else if (ph.phase === 2 || ph.phase === 4) r = f(function (x, a) { return a === 11 && x.leg === li; });
+  } else if (ph.phase === 2 || ph.phase === 4) {   // im Fahrzeug: Balken auf dem nächsten Halt (0.13.0), sonst auf der Fahrt
+    var fz = f(function (x, a) { return a === 11 && x.leg === li; }), jetzt = jetztS();
+    r = fz;
+    for (var i = fz + 1; fz >= 0 && i < z.length && z[i].leg === li; i++) {
+      var a2 = z[i].art & 31;
+      if ((a2 === 2 || a2 === 3 || a2 === 4) && z[i].t && z[i].t >= jetzt - 30) { r = i; break; }
+    }
+  }
   else { r = f(function (x, a) { return a === 10 && x.leg === v.legs.length - 1; }); if (r < 0) r = z.length - 1; }
   return r;
 }
@@ -1776,7 +1945,7 @@ function zeigen(a, pos) {
   var v = fahrtV(a), t = jetztS(), ph = fahrtPhase(v, t, pos);
   karteSenden(karteBauen(a, v, ph, t));
   var zeilen = a.art === 'route'
-    ? StreckenM.detailVerbindung(a.v, textHilfe(a.stadt), TT(a.von), TT(a.nach), umstzeit())
+    ? StreckenM.detailVerbindung(a.v, textHilfe(a.stadt), TT(a.von), TT(a.nach), umstzeit(), DMAX)
     : StreckenM.detailAbfahrt(a.f, textHilfe(a.stadt), TT(a.start), DMAX);
   detailSenden(RUBRIK_FAHRT, 0, 0, zeilen, aktZeile(zeilen, ph, v), a.stand || 0);
   return ph;
@@ -1796,15 +1965,16 @@ function fragen(a, ph) {               // true = eine Frage ist jetzt dran (und 
 function abfahrtKennung(x) { return x.lv + '@' + (x.t - (x.d === AUSFALL ? 0 : x.d) * 60); }
 // Verlauf einer Abfahrt der Haltestellen-Seite: mit Ziel kommen die Halte schon mit (RMV passlist, Transitous
 // intermediateStops), ohne Ziel eine Abfrage mehr (RMV journeyDetail, Transitous trip) ab der eigenen Haltestelle.
-function detailAbfahrtSenden(st, seite, fahrten, nr, quelle, veraltet, stand) {
-  if (!fahrten.length) return detailSenden(0, seite, 0, []);   // keine Abfahrt: leere Detailansicht ("keine Fahrt")
-  var k = detailWahl('0:' + seite, fahrten, nr, abfahrtKennung), x = fahrten[k], stadt = L.stadtVon(st.a.name);
+// nrUhr: Nummer an die Uhr, wenn sie nicht die Abfahrt der Seite ist (LISTE aus WEITERE FAHRTEN, 0.13.0)
+function detailAbfahrtSenden(st, seite, fahrten, nr, quelle, veraltet, stand, nrUhr) {
+  if (!fahrten.length) return detailSenden(0, seite, nrUhr === undefined ? 0 : nrUhr, []);   // keine Abfahrt: leere Detailansicht ("keine Fahrt")
+  var k = nrUhr === undefined ? detailWahl('0:' + seite, fahrten, nr, abfahrtKennung) : 0, x = fahrten[k], stadt = L.stadtVon(st.a.name);
   var basis = { ab: x.t, an: x.an || 0, linie: x.lv || x.l, richtung: x.r || x.z || '', steig: x.s, del: x.d === AUSFALL ? 0 : x.d,
                 ausfall: x.d === AUSFALL, zwischen: x.zw || [], zielName: st.b ? st.b.name : (x.z || x.r || ''), zielSteig: x.zs || '' };
   function fertig(f) {
     if (veraltet()) return;
     var startName = T(st.a.kurz || L.kurzname(st.a.name, stadt), L.klarname(st.a.name, stadt));
-    detailSenden(0, seite, k, StreckenM.detailAbfahrt(f, textHilfe(stadt), startName, DMAX), undefined, stand);
+    detailSenden(0, seite, nrUhr === undefined ? k : nrUhr, StreckenM.detailAbfahrt(f, textHilfe(stadt), startName, DMAX), undefined, stand);
     var fk = JSON.parse(JSON.stringify(f));
     fk.abPlan = x.t - (x.d === AUSFALL ? 0 : x.d) * 60; fk.steigPlan = x.sp || ''; if (x.anPlan) fk.anPlan = x.anPlan;
     fk.zn = x.zn || '';                  // Zugnummer für die DB (0.9.0)
@@ -1925,7 +2095,7 @@ function routenSenden() {
 
 // Verbindungen von -> nach (je { lat, lon }) aus der gewählten Quelle. fertig(fehler, [Verbindung], 'RMV' | 'TRANS')
 // an (0.11.0): Ankunft spätestens (UTC-Sekunden), 0 = ab jetzt
-function verbindungenHolen(von, nach, fertig0, an) {
+function verbindungenHolen(von, nach, fertig0, an, ab) {   // an: ankommen bis (0.11.0); ab: losfahren ab (WEITERE FAHRTEN, 0.13.0)
   var dz = an ? new Date((an + mezVersatz(an)) * 1000).toISOString() : '';
   var mx = umstiege() === 9 ? 5 : umstiege(), fm = fussweg() * GEHEN_M_MIN;
   function fertig(f, liste, q) {        // Züge: DB drüber (0.9.0)
@@ -1936,7 +2106,7 @@ function verbindungenHolen(von, nach, fertig0, an) {
     transitousHolen('v5/plan?fromPlace=' + von.lat.toFixed(6) + ',' + von.lon.toFixed(6) + '&toPlace=' + nach.lat.toFixed(6) + ',' + nach.lon.toFixed(6) +
       '&maxTransfers=' + mx + '&minTransferTime=' + umstzeit() + '&pedestrianSpeed=1.11&numItineraries=5' +
       '&maxPreTransitTime=' + fussweg() * 60 + '&maxPostTransitTime=' + fussweg() * 60 +
-      (an ? '&arriveBy=true&time=' + new Date(an * 1000).toISOString() : ''), function (f, d) {
+      (an ? '&arriveBy=true&time=' + new Date(an * 1000).toISOString() : ab ? '&time=' + new Date(ab * 1000).toISOString() : ''), function (f, d) {
       if (f) return fertig(f === 'kein Netz' ? STATUS_NETZ : STATUS_FEHLER, null, 'TRANS');
       try { fertig(null, (d.itineraries || []).map(StreckenM.ausTransitous), 'TRANS'); }
       catch (e) { console.log('Transitous-Verbindungen unlesbar: ' + e); fertig(STATUS_FEHLER, null, 'TRANS'); }
@@ -1949,7 +2119,7 @@ function verbindungenHolen(von, nach, fertig0, an) {
          '&originCoordLat=' + von.lat.toFixed(6) + '&originCoordLong=' + von.lon.toFixed(6) +
          '&destCoordLat=' + nach.lat.toFixed(6) + '&destCoordLong=' + nach.lon.toFixed(6) +
          '&originWalk=1,0,' + fm + ',100&destWalk=1,0,' + fm + ',100' +
-         (an ? '&searchForArrival=1&date=' + dz.slice(0, 10) + '&time=' + dz.slice(11, 16) : ''), function (f, d) {
+         (an ? '&searchForArrival=1&date=' + dz.slice(0, 10) + '&time=' + dz.slice(11, 16) : ab ? rmvAb(ab) : ''), function (f, d) {
     if (f === null) {
       try { return fertig(null, (d.Trip || []).map(StreckenM.ausRmv), 'RMV'); }
       catch (e) { console.log('RMV-Verbindungen unlesbar: ' + e); f = STATUS_FEHLER; }
@@ -2032,16 +2202,22 @@ function verbindungenLaden(r, i, extra, kanal, detail) {
         });
       if (!mitDetail || detail === undefined || detail < 0) return;
       if (detail === VORSCHLAG) return vorschlagDetailSenden(1, i);
+      if (detail === LISTE) return fahrtenDetailSenden(1, i);
       if (!v.length) return detailSenden(1, i, 0, []);
-      // Ortsname weg nur für den Ort der ersten Haltestelle ("HBF"), fremde behalten ihn ("MAINZ HBF")
-      var k = detailWahl('1:' + i, v, detail, StreckenM.kennung), erste = v[k].legs.filter(function (l) { return !l.fuss; })[0];
-      var stadt = L.stadtVon(erste ? erste.von : r.nach.name);
-      var vonName = r.von ? ortName(r.von) : T('HIER', 'Hier');
-      detailSenden(1, i, k, StreckenM.detailVerbindung(v[k], textHilfe(stadt), vonName, ortName(r.nach), umstzeit()), undefined, stand || jetztS());
-      letztesDetail = { rubrik: 1, art: 'route', v: v[k], stadt: stadt, ziel: { lat: r.nach.lat, lon: r.nach.lon },
-                        von: r.von ? { led: r.von.kurz, klar: r.von.klar } : { led: 'HIER', klar: 'Hier' },
-                        nach: { led: r.nach.kurz, klar: r.nach.klar }, titel: { led: r.nach.kurz, klar: r.nach.klar } };
+      var k = detailWahl('1:' + i, v, detail, StreckenM.kennung);
+      routeDetailSenden(r, i, k, v[k], stand || jetztS());
   }
+}
+// Details einer Verbindung v der Strecke r an die Uhr (Nummer nr), Grundlage für FAHRT STARTEN
+function routeDetailSenden(r, i, nr, v, stand) {
+  // Ortsname weg nur für den Ort der ersten Haltestelle ("HBF"), fremde behalten ihn ("MAINZ HBF")
+  var erste = v.legs.filter(function (l) { return !l.fuss; })[0];
+  var stadt = L.stadtVon(erste ? erste.von : r.nach.name);
+  var vonName = r.von ? ortName(r.von) : T('HIER', 'Hier');
+  detailSenden(1, i, nr, StreckenM.detailVerbindung(v, textHilfe(stadt), vonName, ortName(r.nach), umstzeit(), DMAX), undefined, stand);
+  letztesDetail = { rubrik: 1, art: 'route', v: v, stadt: stadt, ziel: { lat: r.nach.lat, lon: r.nach.lon },
+                    von: r.von ? { led: r.von.kurz, klar: r.von.klar } : { led: 'HIER', klar: 'Hier' },
+                    nach: { led: r.nach.kurz, klar: r.nach.klar }, titel: { led: r.nach.kurz, klar: r.nach.klar } };
 }
 
 // Sofort-Strecke (VON HIER NACH): Platz HIER, ab Standort zu einem Favoriten oder zuletzt genutzten Ziel.
