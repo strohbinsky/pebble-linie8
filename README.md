@@ -42,12 +42,12 @@ Transitous, Echtzeit im Rhein-Main-Gebiet vom RMV und für Züge bundesweit von 
 *Aktive Fahrt in Phosphor: losgehen, jetzt los, im Bus, zwei Halte vor dem Ausstieg.*
 
 <p>
-  <img src="bilder/fahrt-klar-0110.png" width="412" alt="Fahrt in Klar">
+  <img src="bilder/fahrt-klar-0120.png" width="200" alt="Fahrt in Klar">
   &nbsp;
   <img src="bilder/ankommen-0120.png" width="200" alt="Ankommen um">
 </p>
 
-*Links dieselbe Fahrt in Klar: aktueller Schritt und Verlauf. Rechts **Ankommen um 11:30**: die drei letzten
+*Links dieselbe Fahrt in Klar, rechts **Ankommen um 11:30**: die drei letzten
 passenden Verbindungen, unten die Zielzeit.*
 
 ## Installation
