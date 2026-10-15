@@ -89,7 +89,7 @@ warte(function () { return ctx.e && ctx.e.suche && ctx.e.suche.length; }, functi
           klicke({ 'data-a': 'rrueck', 'data-i': '1' });
           klicke({ 'data-a': 'umstiegeWert', value: '1' });
           klicke({ 'data-a': 'uebersicht' });
-          if (!/Strecken/.test(text()) || !/Favoriten/.test(text()) || !/Verbindungssuche/.test(text())) { console.log('FEHLER: Hauptmenü unvollständig'); process.exit(1); }
+          if (!/Strecken/.test(text()) || !/Favoriten/.test(text()) || !/Aktualisieren/.test(text()) || !/Suche/.test(text())) { console.log('FEHLER: Hauptmenü unvollständig'); process.exit(1); }   // 0.15.0: Rubriken wie an der Uhr
           console.log('Hauptmenü:', text().substring(0, 200));
           if (ergebnis) { console.log('FEHLER: Seite vor Speichern geschlossen'); process.exit(1); }
           if (!/Speichern und schließen/.test(app.innerHTML)) { console.log('FEHLER: Schließen-Knopf ohne Speichern-Hinweis'); process.exit(1); }

@@ -48,7 +48,7 @@
 #define LAUF_PX 3          // Punkte je Schritt, für beide Ansichten gleich (0.13.0)
 #define LAUF_PAUSE 8       // so viele Schritte (1 s) steht der Anfang, bevor er losläuft
 #define MAXL  300          // Listeneinträge vom Handy (Ziele am Hbf mit allen Linien), muss zu MAXL in index.js passen
-#define LTXT  32           // Zeichen je Listeneintrag
+#define LTXT  48           // Zeichen je Listeneintrag; vom Handy kommen höchstens 31, Einstellungen "NAME|Wert" (0.15.0, bis 0.14.0 32)
 #define VTXT  64           // Vorschlag FRUEHER DA "vorn|hinten" (0.12.0; bis 0.11.0 LTXT, die Ankunft wurde abgeschnitten)
 #define VORSCHLAG MAXD     // DETAIL-Nummer des Vorschlags FRUEHER DA (0.8.0)
 #define LISTE (MAXD + 1)   // DETAIL-Nummer einer Fahrt aus WEITERE FAHRTEN (0.13.0), wie LISTE in index.js
@@ -65,35 +65,36 @@
 #define PK_UMSTIEGE 7      // persist: Strecken mit höchstens so vielen Umstiegen (9 = beliebig)
 #define PK_FUSSWEG 8       // persist: Fußweg am Anfang und Ende höchstens (min)
 #define PK_UMSTZEIT 9      // persist: Umstiegszeit mindestens (min)
+#define PK_AKTU 10         // persist: Startseite und Aktualisieren (AKTU, 0.15.0)
 #define DMAX 40            // Detailzeilen, muss zu DMAX in index.js passen (0.13.0: 24 -> 40, Strecken mit Zwischenhalten)
 #define DBLOCK 8           // muss zu D_ART[8] in package.json passen
 #define DTXT 48            // Zeichen je Detailtext (Handy kürzt auf 47 Bytes; bis 0.12.0 28, lange Halte kamen gekürzt an)
-#define AKTIV_S 300        // Seite und Details laden sich jede Minute neu, bis 5 min nach dem letzten Tastendruck
 #define LANG_MS 500        // Hoch/Runter so lange halten: Rubrik wechseln (Seite) bzw. schnell blättern (Listen)
 #define RUBRIK_MS 1000     // Name der Rubrik so lange groß einblenden
 
 enum { ST_LEER = -2, ST_LADE = -1, ST_SOLL = 0, ST_LIVE = 1, ST_NETZ = 2, ST_FEHLER = 3, ST_STANDORT = 4 };
 enum { M_ANZEIGE, M_LISTE, M_LADE, M_DETAIL, M_SUCHE, M_FRAGE };   // was die Uhr gerade zeigt (M_FRAGE: Bestätigung, 0.8.0)
-enum { L_HANDY, L_MENUE, L_EINST, L_ANSICHT, L_UMKREIS, L_QUELLE,      // woher die Liste stammt
-       L_ANZEIGE, L_EABF, L_ESTRECKE, L_UMST, L_FUSS, L_UZEIT, L_DMENUE };
+// Woher die Liste stammt. Seit 0.15.0 EINSTELLUNGEN nach Rubriken: L_ANZEIGE bis L_DATEN zeigen je Einstellung zwei
+// Zeilen (Name, Wert), L_WERTE die Werteliste einer Einstellung, L_ZAHL die eigene Angabe (1–60 min)
+enum { L_HANDY, L_MENUE, L_EINST, L_DMENUE, L_ANZEIGE, L_AKTU, L_EABF, L_ESTR, L_SUCHE, L_DATEN, L_WERTE, L_ZAHL };
 enum { QUELLE_AUTO = 0, QUELLE_RMV = 1, QUELLE_TRANS = 2 };                     // wie QUELLEN in index.js
 enum { ABF_PLAN = 0, ABF_AKTUELL = 1 };                                          // Abfahrtszeit: Fahrplan oder mit Verspätung
-enum { E_ANZEIGE, E_QUELLE, E_UMKREIS, E_ABF, E_STRECKEN, E_FAVORITEN };         // Menü Einstellungen (0.8.0: Umkreis oben)
-enum { ES_UMSTIEGE, ES_FUSSWEG, ES_UMSTZEIT, ES_ALLE };                            // Einstellungen > Strecken
+// Einstellungen (0.15.0), Reihenfolge wie in den Rubriken; Tabelle EINST bei den Menüs
+enum { S_STARTSEITE, S_ANSICHT, S_INVERS, S_KONTRAST, S_ABFAHRT, S_DAUER, S_REGEL, S_NACHAB, S_OHNE,
+       S_UMKREIS, S_UMSTIEGE, S_FUSSWEG, S_UMSTZEIT, S_QUELLE, S_N };
 // Zwei Ansichten seit 0.13.0. LAYOUT vom Handy: 5 Papier, 4 Phosphor weiß; alte Werte 0-3 (LED, Klar, Phosphor grün,
 // LED invers) werden beim Lesen umgesetzt: Phosphor grün -> Phosphor weiß, alles andere -> Papier.
-// Seit 0.14.0 dritte Ansicht Signal (LAYOUT 6): modern, Weiß auf Schwarz, Linienfarben, große Minuten. Zeichnet über
-// den Weg von Papier (k_…), eigene Seite, Strecke, Fahrtkarte, Kopf und Fuß. Invertiert: Schwarz auf Weiß.
-enum { LAYOUT_PAPIER = 1, LAYOUT_PHOSPHOR = 2, LAYOUT_SIGNAL = 3 };
-#define SIGNAL (s_layout == LAYOUT_SIGNAL)
-#define KLAR_ART (s_layout != LAYOUT_PHOSPHOR)   // Papier und Signal: Systemschrift, Umlaute
-// LAYOUT (Nachricht, Speicher) seit 0.9.1: Grundansicht (0 LED, 1 Klar, 2 Phosphor grün, 4 Phosphor weiß; 3 = LED invers
-// bis 0.9.0) + 8 invertiert + 16 hoher Kontrast + 32 App nach RUHE_MS schließen (0.9.2, Standard aus)
+// Die dritte Ansicht Signal (LAYOUT 6, 0.14.0) ist seit 0.15.0 wieder entfernt (Seb 2026-10-15: noch Fehler, Platz für
+// Cartoon); gespeichertes Signal wird Papier. Code: dateien/signal-0.14.0-main.c, Zweig signal im Git-Repo.
+enum { LAYOUT_PAPIER = 1, LAYOUT_PHOSPHOR = 2 };
+#define KLAR_ART (s_layout != LAYOUT_PHOSPHOR)   // Papier: Systemschrift, Umlaute
+// LAYOUT (Nachricht, Speicher) seit 0.9.1: Grundansicht (0 LED, 1 Klar, 2 Phosphor grün, 4 Phosphor weiß, 5 Papier,
+// 6 Signal; 3 = LED invers bis 0.9.0) + 8 invertiert + 16 hoher Kontrast; + 32 App schließen nur bis 0.14.0
 #define LW_INVERS 8
 #define LW_KONTRAST 16
-#define LW_SCHLIESSEN 32
-#define LW_SCHALTER (LW_INVERS | LW_KONTRAST | LW_SCHLIESSEN)
-enum { A_NEU = 1, A_RUECKFAHRT = 2, A_AENDERN = 3, A_LOESCHEN = 4,
+#define LW_SCHLIESSEN 32   // bis 0.14.0 App nach 10 s schließen, seit 0.15.0 OHNE TASTE (s_ohne); nur noch beim Umstieg gelesen
+#define LW_SCHALTER (LW_INVERS | LW_KONTRAST)
+enum { A_NEU = 1, A_RUECKFAHRT = 2, A_AENDERN = 3, A_LOESCHEN = 4,       // AKTION an das Handy, wie in index.js
        A_WAHL = 5, A_ZURUECK = 6, A_LAYOUT = 7, A_UMKREIS = 8, A_QUELLE = 9, A_ABFAHRT = 10, A_DAUER = 11,
        A_HIER = 13,
        A_R_NEU = 20, A_R_LOESCHEN = 21, A_R_RUECK = 22, A_SOFORT = 23, A_SOFORT_NR = 24, A_FAVORITEN = 25,
@@ -102,15 +103,12 @@ enum { A_NEU = 1, A_RUECKFAHRT = 2, A_AENDERN = 3, A_LOESCHEN = 4,
        A_ALLE_LOESCHEN = 34, A_FAV_SEITE = 35, A_SOFORT_SPEICHERN = 36,          // 0.8.0
        A_R_ANKUNFT = 37,                                                       // 0.11.0
        A_FAHRTEN = 38,                                                         // 0.13.0: WEITERE FAHRTEN
-       A_FAHRT_ZEIGEN = -29,                                                   // -30 NAECHSTE FAHRT bis 0.13.0
-       A_ANZ = -19, A_EABF = -20, A_ESTR = -21, A_UMST_W = -22, A_FUSS_W = -23, A_UZEIT_W = -24,
-       A_SET_V = -26, A_R_AENDERN = -28,
-       A_ZU_ABF = -32, A_ZU_STR = -33, A_FAV_A = -34, A_FAV_B = -35, A_FRUEHER = -36,   // 0.8.0, nur Uhr
+       A_AKTU = 39,                                                            // 0.15.0: Startseite und Aktualisieren (AKTU)
+       // negative: nur auf der Uhr
+       A_EINST = -1, A_HIER_START = -18, A_R_AENDERN = -28, A_FAHRT_ZEIGEN = -29,   // -30 NAECHSTE FAHRT bis 0.13.0
+       A_ZU_ABF = -32, A_ZU_STR = -33, A_FAV_A = -34, A_FAV_B = -35, A_FRUEHER = -36,   // 0.8.0
        A_F_LOESCHEN = -37, A_F_BEENDEN = -38, A_F_ALLE_ABF = -39, A_F_ALLE_STR = -40,
-       A_EINST = -1, A_ANSICHT = -2,                               // -3 LED bis 0.11.0, -4 Klar und -9 Phosphor grün bis 0.12.0
-       A_UMK = -5, A_SET_U500 = -6, A_SET_U1000 = -7, A_SET_U2000 = -8,
-       A_QLL = -10, A_SET_QAUTO = -11, A_SET_QRMV = -12, A_SET_QTRANS = -13,
-       A_ABF_UM = -14, A_DAUER_UM = -15, A_SET_PAPIER = -16, A_SET_PWEISS = -17, A_HIER_START = -18, A_INVERS_UM = -60, A_KONTRAST_UM = -61, A_SCHLIESSEN_UM = -62, A_SET_SIGNAL = -63 };   // negative: nur auf der Uhr                        // AKTION an das Handy, wie in index.js
+       A_RUB = -41, A_EINST_S = -42, A_WERT = -43 };   // 0.15.0: Rubrik, Einstellung, Wert (bis 0.14.0 je Wert eine Aktion)
 
 static Window *s_window;
 static Layer *s_layer;
@@ -184,7 +182,17 @@ static int s_buchst;
 static DictationSession *s_diktat;
 
 static int s_umstiege = 2, s_fussweg = 15, s_umstzeit = 2;
-static time_t s_taste;              // letzter Tastendruck (automatisch neu laden bis AKTIV_S danach)
+static int32_t s_taste;             // letzter Tastendruck (neu laden bis OHNE TASTE danach)
+static int32_t s_lade_t;            // letzte Anfrage der Seite (REGELMAESSIG zählt ab hier)
+static int s_ohne = 5;              // OHNE TASTE (0.15.0): -1 nach 10 s schließen, 0 immer weiter laden, sonst nach so vielen
+                                    // Minuten nicht mehr laden (ersetzt APP SCHLIESSEN und die feste Ladepause AKTIV_S)
+static int s_regel = 1;             // REGELMAESSIG: alle so viele Minuten neu laden, 0 = nur beim Öffnen
+static bool s_nachab = true;        // NACH ABFAHRT: neu laden, sobald die oberste Abfahrt bzw. Verbindung aus der Liste fällt
+static bool s_startseite;           // STARTSEITE (Standard aus): beim Öffnen die nächste Haltestelle
+static bool s_start;                // die Startseite wird gezeigt (Platz HIER mit Nummer 0)
+static bool s_hier_start;           // ABFAHRTEN HIER kam von der Startseite: Zurück führt dorthin
+static int16_t s_hier_m;            // Entfernung zur Haltestelle von ABFAHRTEN HIER bzw. Startseite (m), 0 = unbekannt
+static bool s_lzwei;                // Liste mit zwei Zeilen je Eintrag (Einstellungen: "NAME|Wert")
 static AppTimer *s_rubrik_timer;    // solange gesetzt: Name der Rubrik eingeblendet
 static AppTimer *s_lang_timer;      // Hoch/Runter wird gehalten
 static int s_lang_d;
@@ -199,6 +207,7 @@ static int s_status_start = ST_LADE; // Status, solange keine Strecke da ist
 static bool s_beruehrt;             // Taste gedrückt seit dem Start: kein Sprung nach Standort mehr
 // Aktive Fahrt (0.6.6): eigene Detailansicht einer festen Fahrt, gegenüber dem Handy Rubrik 2
 #define RUBRIK_FAHRT 2
+#define RUBRIK_START 3     // SPRUNG vom Handy: Startseite zeigen (0.15.0)
 static bool s_fahrt;                // die Detailansicht zeigt die aktive Fahrt
 static int32_t s_fahrt_ende;        // Ende der aktiven Fahrt (UTC), 0 = keine
 static char s_ftitel[NAMELEN];
@@ -208,7 +217,7 @@ static char s_ftitel[NAMELEN];
 #define RUHE_MS 10000
 #define KONFIG_S 600
 static AppTimer *s_ruhe;
-static time_t s_konfig;
+static int32_t s_konfig;
 static bool s_diktat_an;
 // Fahrtkarte (0.7.0): der aktuelle Schritt der aktiven Fahrt bildschirmfüllend, vom Handy fertig formuliert
 #define KZ 6               // Zeilen unter dem Haltestellennamen, wie K_L[6] in package.json
@@ -218,6 +227,8 @@ typedef struct {
   char kopf[NAMELEN], kopfr[16], zeitl[24], r1[16], r2[20], label[16], name[NAMELEN], steig[4], fuss[28];
   char l[KZ][8], w[KZ][28], r[KZ][16], s[KZ][4];
   uint8_t f[KZ];                      // 1 rechts Warnung, 2 rechts hell, 4 ganze Zeile, 8 Trennlinie davor, 16/32/64 Wert gelb/grau/hell, 128 belegt
+  int32_t ht[3];                      // im Fahrzeug: Abfahrt der nächsten drei Halte bis zum Ausstieg (0.15.0), 0 = keiner
+  char hn[3][13];                     // ihre Namen (wie r2)
 } Karte;
 static Karte *s_k;                  // Heap
 static bool s_karte;                // Karte zeigen (sonst der Verlauf)
@@ -269,7 +280,6 @@ static int32_t s_hfav, s_rfav, s_sfav;   // Bits: Ort ist schon Favorit (Seite i
 static int32_t s_dstand;            // Stand der Details bzw. der Fahrt (UTC), 0 = unbekannt
 static int s_layout = LAYOUT_PAPIER;          // Papier (Standard seit 0.13.0): Systemschrift fett, kein Grau, Ziffern in Roboto Bold
 static bool s_invers, s_kontrast;             // Farben invertiert; hoher Kontrast (keine graue Schrift, wirkt in Phosphor)
-static bool s_schliessen;                     // nach RUHE_MS ohne Taste zum Watchface (0.9.2, Standard aus)
 typedef struct { GColor k_papier, k_tinte, k_rot, k_orange, k_grau, k_dunkel, k_lgrau,
                  p_hg, p_text, p_grau, p_gitter, p_schwach, p_hell, p_cyan, p_warn; } Palette;
 static Palette s_pal;
@@ -281,16 +291,6 @@ static void schriften_setzen(void) {           // Papier: fette Systemschrift, Z
   s_f_uhr = s_roboto32;
   s_f14 = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
   s_f18 = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-}
-// Signal: Farben für einen hellen bzw. dunklen Grund (auch für die weiße Karte der nächsten Abfahrt). Grau nur
-// als Zweitschrift mit Kontrast ab 7:1 (#AAAAAA auf Schwarz, #555555 auf Weiß), Linien in der jeweils anderen Stufe.
-static void sig_farben(bool hell) {
-  s_pal.k_papier = hell ? GColorWhite : GColorBlack;
-  s_pal.k_tinte  = hell ? GColorBlack : GColorWhite;
-  s_pal.k_dunkel = s_pal.k_lgrau = hex(hell ? 0x555555 : 0xAAAAAA);
-  s_pal.k_grau   = hex(hell ? 0xAAAAAA : 0x555555);
-  s_pal.k_orange = hex(hell ? 0xAA5500 : 0xFFAA00);
-  s_pal.k_rot    = hex(hell ? 0xAA0000 : 0xFF5555);
 }
 static void farben_setzen(void) {              // setzt auch die Schriften, die hängen an der Ansicht
   schriften_setzen();
@@ -312,7 +312,6 @@ static void farben_setzen(void) {              // setzt auch die Schriften, die 
   // Papier: nie Grau (Seb 2026-10-12). Phosphor: nur mit hohem Kontrast. Linien, Raster, Farbhinweise bleiben
   s_pal.k_grau = s_pal.k_dunkel = s_pal.k_tinte;
   s_pal.k_lgrau = s_pal.k_papier;
-  if (SIGNAL) sig_farben(s_invers);                    // Signal: normal dunkel, invertiert hell; Grau erlaubt
   if (s_kontrast) s_pal.p_grau = s_pal.p_hell = s_pal.p_schwach = s_pal.p_text;
 }
 // Balken (0.13.0): eine Zeile wie die gewählte Menüzeile — Grund in Schriftfarbe, alles darin in der Grundfarbe.
@@ -326,7 +325,7 @@ static Palette pal_balken(void) {
   return alt;
 }
 static int layout_wert(void) {
-  return (s_layout == LAYOUT_PHOSPHOR ? 4 : SIGNAL ? 6 : 5) | (s_invers ? LW_INVERS : 0) | (s_kontrast ? LW_KONTRAST : 0) | (s_schliessen ? LW_SCHLIESSEN : 0);
+  return (s_layout == LAYOUT_PHOSPHOR ? 4 : 5) | (s_invers ? LW_INVERS : 0) | (s_kontrast ? LW_KONTRAST : 0);
 }
 static int s_umkreis = 1000;      // Meter; das Handy führt den Wert, die Uhr zeigt und ändert ihn
 static int s_quelle = QUELLE_AUTO; // Quelle der Abfahrten; das Handy führt den Wert, wie beim Umkreis
@@ -361,25 +360,28 @@ static int year_from_days(int32_t z) {
   return yoe + era * 400 + (m <= 2);
 }
 
-static time_t last_sunday_0100_utc(int y, int m) {          // letzter Sonntag im Monat, 01:00 UTC
+// Zeiten seit 0.15.0 als int32_t: time_t ist auf der Pebble 64 Bit breit, Teilen zog die Software-Division
+// __aeabi_ldivmod/__udivmoddi4 ins Programm (0,85 KB). Die int32_t-Felder setzen die Grenze 2038 ohnehin.
+static int32_t jetzt(void) { return (int32_t)time(NULL); }
+static int32_t last_sunday_0100_utc(int y, int m) {         // letzter Sonntag im Monat, 01:00 UTC
   const int32_t last = days_from_civil(m == 12 ? y + 1 : y, m == 12 ? 1 : m + 1, 1) - 1;
   const int wd = (int)((last + 4) % 7);                    // 0 = Sonntag (1970-01-01 war Donnerstag)
-  return (time_t)(last - wd) * 86400 + 3600;
+  return (last - wd) * 86400 + 3600;
 }
 
-static int berlin_offset(time_t utc) {
-  const int y = year_from_days((int32_t)(utc / 86400));
+static int berlin_offset(int32_t utc) {
+  const int y = year_from_days(utc / 86400);
   return (utc >= last_sunday_0100_utc(y, 3) && utc < last_sunday_0100_utc(y, 10)) ? 7200 : 3600;
 }
 
-static void berlin_hm(time_t utc, int *h, int *m) {
+static void berlin_hm(int32_t utc, int *h, int *m) {
   const int s = (int)((utc + berlin_offset(utc)) % 86400);
   *h = s / 3600;
   *m = (s / 60) % 60;
 }
 
-static void berlin_datum(time_t utc, int *wtag, int *tag, int *monat) {   // wtag 0 = Sonntag
-  const int32_t z0 = (int32_t)((utc + berlin_offset(utc)) / 86400);
+static void berlin_datum(int32_t utc, int *wtag, int *tag, int *monat) {   // wtag 0 = Sonntag
+  const int32_t z0 = (utc + berlin_offset(utc)) / 86400;
   *wtag = (int)((z0 + 4) % 7);
   const int32_t z = z0 + 719468;
   const int era = (z >= 0 ? z : z - 146096) / 146097;
@@ -415,7 +417,7 @@ static bool gross_moeglich(const char *l) {     // nur ein- und zweistellige Zif
 
 
 // Indizes der nächsten (bis zu MAXD) noch nicht abgefahrenen Fahrten.
-static int naechste(const Strecke *s, time_t now, int idx[MAXD]) {
+static int naechste(const Strecke *s, int32_t now, int idx[MAXD]) {
   int n = 0;
   for (int i = 0; i < MAXD; i++)
     if (s->dep[i] != 0 && s->dep[i] >= now) idx[n++] = i;
@@ -446,8 +448,8 @@ static void vorschlag_teil(const char *vt, int teil, char *buf, size_t n) {
 
    // Text ab Spalte 3 bis 65
 
-static void uhr_text(char *buf, size_t n) { int h, m; berlin_hm(time(NULL), &h, &m); snprintf(buf, n, "%02d:%02d", h, m); }
-static bool stand_alt(int32_t st) { return st > 0 && time(NULL) - st > ALT_S; }
+static void uhr_text(char *buf, size_t n) { int h, m; berlin_hm(jetzt(), &h, &m); snprintf(buf, n, "%02d:%02d", h, m); }
+static bool stand_alt(int32_t st) { return st > 0 && jetzt() - st > ALT_S; }
 
 // 0.8.0: Uhrzeit überall oben rechts (hell), links der Titel gedimmt; Fuß links und rechts ohne Uhr
 
@@ -468,12 +470,12 @@ static int seiten_status(int32_t *stand, const char **quelle) {
 }
 
 // Verbindungen, die noch nicht vorbei sind (Losgehen höchstens 1 min her)
-static int route_naechste(const Route *r, time_t now, int idx[MAXD]) {
+static int route_naechste(const Route *r, int32_t now, int idx[MAXD]) {
   int n = 0;
   for (int i = 0; i < r->n && i < MAXD; i++) if (r->los[i] && r->los[i] >= now - 60) idx[n++] = i;
   return n;
 }
-static int rest_min(int32_t t, time_t now) { const int m = (int)((t - now) / 60); return m < 0 ? 0 : m; }
+static int rest_min(int32_t t, int32_t now) { const int m = (t - now) / 60; return m < 0 ? 0 : m; }
 static const char *route_warnung(const Route *r, int k, bool klar) {
   if (r->del[k] == AUSFALL || (r->flag[k] & R_AUSFALL)) return klar ? "fällt aus" : "FAELLT AUS";
   if (r->flag[k] & R_WEG) return klar ? "Anschluss weg" : "WEG";
@@ -504,14 +506,15 @@ static bool d_umbruch(int b) { return b + 1 < s_bn && s_bz[b + 1] == ((s_bz[b] &
 #define PD_Y0 25           // Phosphor
 #define PD_H  22
 static int d_sichtbar(void) { return s_layout == LAYOUT_PHOSPHOR ? 8 : 7; }
-// Zeile vorbei: Punkt mit Zeit vor jetzt; Abschnitt: der nächste Punkt danach ist vorbei
-static bool zeile_vorbei(int i, time_t now) {
-  for (int j = i; j < s_dn; j++) if (s_dz[j].t) return s_dz[j].t < now - 30;
+// Zeile vorbei: Punkt mit Zeit bis jetzt; Abschnitt: der nächste Punkt danach ist vorbei. Seit 0.15.0 gilt ein Halt ab
+// seiner Abfahrt als vorbei (das Handy schickt bei Zwischenhalten die Abfahrt), bis 0.14.0 erst 30 s nach der Ankunft
+static bool zeile_vorbei(int i, int32_t now) {
+  for (int j = i; j < s_dn; j++) if (s_dz[j].t) return s_dz[j].t <= now;
   return false;
 }
 static void d_zum_akt(void);
 static void d_zum_jetzt(void) {                        // zum ersten noch kommenden Schritt rollen (eine Zeile Vorlauf)
-  const time_t now = time(NULL);
+  const int32_t now = jetzt();
   int j = 0;
   while (j < s_bn && zeile_vorbei(s_bz[j] & 0x7F, now)) j++;
   if (j >= s_bn) j = 0;
@@ -521,9 +524,9 @@ static void d_zum_jetzt(void) {                        // zum ersten noch kommen
 }
 // Wie viele Abfahrten bzw. Verbindungen gibt es (Select in den Details blättert durch)
 static int detail_anzahl(void) {
-  if (s_rubrik == 1) { int idx[MAXD]; return route_naechste(aktuelle_route(), time(NULL), idx); }
+  if (s_rubrik == 1) { int idx[MAXD]; return route_naechste(aktuelle_route(), jetzt(), idx); }
   int idx[MAXD];
-  return naechste(aktuelle(), time(NULL), idx);
+  return naechste(aktuelle(), jetzt(), idx);
 }
 static int32_t detail_ankunft(void) {                  // Zeit der Zielzeile (letzte Zeile mit Zeit)
   for (int i = s_dn - 1; i >= 0; i--) if (s_dz[i].t) return s_dz[i].t;
@@ -599,6 +602,11 @@ static int umbruch_teil(const char *p, int maxw, int (*breite)(const char *)) {
 #define K_LORANGE GColorFromHEX(0xFF5500)   // Orange auf der Leiste: dunkel genug für die weiße Leiste (invertiert)
 #define K_ZEILE  22        // Listen: Zeilenhöhe in px
 #define K_Y0     28        // Listen: erste Zeile unter dem Titelbalken
+#define K_ZEILE2 40        // Einstellungen: zwei Zeilen je Eintrag (0.15.0); Phosphor P_ZEILE2
+#define P_ZEILE2 30
+static int l_zeilen(void) { return !s_lzwei ? LZEILEN : KLAR_ART ? 4 : 6; }      // sichtbare Einträge
+static bool trenner(int i) { return !strncmp(s_ltext[i], "-- ", 3); }   // Zwischenüberschrift bzw. Erklärzeile
+static int l_hoehe(void) { return s_lzwei ? (KLAR_ART ? K_ZEILE2 : P_ZEILE2) : K_ZEILE; }   // P_ZEILE = K_ZEILE
 
 static void k_text(GContext *ctx, const char *t, GFont f, GRect r, GTextAlignment a, GColor c) {
   graphics_context_set_text_color(ctx, c);
@@ -616,7 +624,6 @@ static void k_flaeche(GContext *ctx, GRect r, GColor c) {
 
 // Papier: Text t im Rahmen r; zu lang -> läuft (Regel oben). Systemschrift lässt sich nicht beschneiden: links und
 // rechts von r wird die Zeile zy..zy+zh mit bg übermalt. Deshalb zeichnet jede Zeile ihren Lauftext zuerst.
-static int s_lauf_x0 = 0, s_lauf_x1 = 200;      // übermalt wird nur zwischen diesen Kanten (Signal: innerhalb der Karte)
 static void lauf_k(GContext *ctx, const char *t, GFont f, GRect r, GColor c, GColor bg, int zy, int zh) {
   const int w = k_breite(t, f);
   const int v = w > r.size.w ? lauf_versatz(w) : 0;
@@ -625,15 +632,14 @@ static void lauf_k(GContext *ctx, const char *t, GFont f, GRect r, GColor c, GCo
   graphics_context_set_text_color(ctx, c);
   graphics_draw_text(ctx, t, f, GRect(x, r.origin.y, w + 4, r.size.h), GTextOverflowModeFill, GTextAlignmentLeft, NULL);
   graphics_draw_text(ctx, t, f, GRect(x + w + LAUF_LUECKE, r.origin.y, w + 4, r.size.h), GTextOverflowModeFill, GTextAlignmentLeft, NULL);
-  k_flaeche(ctx, GRect(s_lauf_x0, zy, r.origin.x - s_lauf_x0, zh), bg);
-  k_flaeche(ctx, GRect(x1, zy, s_lauf_x1 - x1, zh), bg);
+  k_flaeche(ctx, GRect(0, zy, r.origin.x, zh), bg);
+  k_flaeche(ctx, GRect(x1, zy, 200 - x1, zh), bg);
 }
 
 // Fußbalken: links Text (optional mit farbigem Punkt), rechts der Stand (grau, ab 2 min orange). Seit 0.8.0 ohne Uhr.
-#define SIG_AKZENT GColorFromHEX(0xFF5500)
 static void k_fuss(GContext *ctx, const char *links, bool punkt, GColor farbe, int32_t stand) {
-  const GColor schrift = SIGNAL ? K_DUNKEL : K_PAPIER;  // Signal: kein Balken, Zweitschrift auf dem Grund
-  if (!SIGNAL) k_flaeche(ctx, GRect(0, 210, 200, 18), K_TINTE);
+  const GColor schrift = K_PAPIER;
+  k_flaeche(ctx, GRect(0, 210, 200, 18), K_TINTE);
   int x = 6;
   if (punkt) {
     graphics_context_set_fill_color(ctx, farbe);
@@ -653,13 +659,6 @@ static void k_kopf(GContext *ctx, const char *titel, GColor farbe) {
   char uhr[8];
   uhr_text(uhr, sizeof(uhr));
   const int uw = k_breite(uhr, s_f18b) + 8;
-  if (SIGNAL) {                                        // Signal: Titel auf dem Grund, Uhrzeit grau, Linie in Akzentfarbe
-    k_flaeche(ctx, GRect(0, 0, 200, 26), K_PAPIER);
-    lauf_k(ctx, titel, s_f18b, GRect(6, -1, 188 - uw, 24), K_TINTE, K_PAPIER, 0, 23);
-    k_text(ctx, uhr, s_f18b, GRect(194 - uw, -1, uw, 24), GTextAlignmentRight, K_DUNKEL);
-    k_flaeche(ctx, GRect(6, 23, 188, 2), SIG_AKZENT);
-    return;
-  }
   k_flaeche(ctx, GRect(0, 0, 200, 26), K_TINTE);
   lauf_k(ctx, titel, s_f18b, GRect(6, -1, 188 - uw, 24), farbe, K_TINTE, 0, 26);
   k_text(ctx, uhr, s_f18b, GRect(194 - uw, -1, uw, 24), GTextAlignmentRight, K_PAPIER);
@@ -685,7 +684,7 @@ static const char *k_rvon(const Route *r) { return r->von[0] ? (r->vonk[0] ? r->
 
 // Seite in Klar (0.50): "ab" Haltestelle groß, darunter "nach" Ziel; drei Abfahrten mit Zeit in LECO 32.
 // Ohne Ziel steht unter jeder Zeit das Endziel der Fahrt.
-static void k_seite(GContext *ctx, const Strecke *s, time_t now) {
+static void k_seite(GContext *ctx, const Strecke *s, int32_t now) {
   const bool ziel = hat_ziel(s);
   k_name(ctx, "ab", GRect(8, 50, 24, 18), k_name0(s), s_f24b, GRect(28, 40, 166, 30), K_TINTE);
   if (ziel) k_name(ctx, "nach", GRect(8, 70, 30, 18), k_name1(s), s_f18, GRect(38, 66, 156, 24), K_DUNKEL);
@@ -758,7 +757,7 @@ static void k_seite(GContext *ctx, const Strecke *s, time_t now) {
 
 // Klar: Strecke (0.6.1) — "nach" Ziel groß, "ab" Start; je Verbindung Losgehzeit groß, daneben oben Ankunft und
 // Umstiege bzw. Warnung (rot), unten die Linienkette; rechts die Minuten bis zum Losgehen.
-static void k_route(GContext *ctx, const Route *r, time_t now) {
+static void k_route(GContext *ctx, const Route *r, int32_t now) {
   k_name(ctx, "nach", GRect(8, 50, 30, 18), k_rziel(r), s_f24b, GRect(40, 40, 154, 30), K_TINTE);
   k_name(ctx, "ab", GRect(8, 70, 24, 18), k_rvon(r), s_f18, GRect(28, 66, 166, 24), K_DUNKEL);
   int idx[MAXD];
@@ -821,7 +820,7 @@ static bool klar_einzeilig(const Zeile *z) {
   return k_name_x() + k_breite(z->text, s_f24b) <= rand;
 }
 // Jede Zeile zeichnet ihren Text zuerst (Lauftext übermalt links und rechts), dann Achse, Punkt, Zeit und Steig
-static void k_d_zeile(GContext *ctx, int b, int y, time_t now) {
+static void k_d_zeile(GContext *ctx, int b, int y, int32_t now) {
   const int i = s_bz[b] & 0x7F;
   const bool zweite = s_bz[b] & 0x80;
   const Zeile *z = &s_dz[i];
@@ -877,7 +876,7 @@ static const char *seiten_titel(bool klar) {           // Titel der Details: Zie
   return klar && s->klar[0][0] ? s->klar[0] : s->name[0];
 }
 static void k_detail(GContext *ctx) {
-  const time_t now = time(NULL);
+  const int32_t now = jetzt();
   char li[16], re[16], fuss[40];
   k_flaeche(ctx, GRect(0, 0, 200, 228), K_PAPIER);
   detail_kopftext(li, sizeof(li), re, sizeof(re), true);
@@ -958,7 +957,7 @@ static void k_anzeige_fuss(GContext *ctx) {
 }
 
 static void k_anzeige(GContext *ctx) {
-  const time_t now = time(NULL);
+  const int32_t now = jetzt();
   char buf[48];
   int h, m;
   k_flaeche(ctx, GRect(0, 0, 200, 228), K_PAPIER);
@@ -992,6 +991,76 @@ static void k_anzeige(GContext *ctx) {
   k_rubrik(ctx);
 }
 
+// ---------- Startseite (0.15.0, Schalter STARTSEITE, Standard aus) ----------
+// Abfahrten der nächsten Haltestelle wie ABFAHRTEN HIER (Platz HIER, Nummer 0) und zwei Schilder wie auf der
+// Bestätigungsseite: oben Hoch = Rubrik Abfahrten, unten Runter = Rubrik Strecken. Kopf: Name der Haltestelle und
+// Uhrzeit, links neben dem oberen Schild die Entfernung. Je Abfahrt Linie, Endziel, darunter Zeit, Verspätung, Steig.
+#define ST_Y0 62           // erste Abfahrt (beide Ansichten)
+#define ST_DY 36
+#define ST_SCHILD1 30      // oberes und unteres Schild (y)
+#define ST_SCHILD2 178
+static void meter_text(char *buf, size_t n, int m) {   // "120 m", ab 1 km "1,2 km" (Phosphor: "120M", "1.2KM")
+  if (m >= 1000) snprintf(buf, n, T("%d.%dKM", "%d,%d km"), m / 1000, (m % 1000) / 100);
+  else snprintf(buf, n, T("%dM", "%d m"), m);
+}
+static void k_schild(GContext *ctx, int y, const char *t) {   // Schild mit Spitze zur Taste rechts, 24 px hoch
+  const int w = k_breite(t, s_f18b) + 14;
+  graphics_context_set_fill_color(ctx, K_TINTE);
+  graphics_fill_rect(ctx, GRect(188 - w, y, w, 24), 5, GCornersLeft);
+  for (int i = 0; i <= 11; i++) graphics_fill_rect(ctx, GRect(188 + i, y + i, 1, 24 - 2 * i), 0, GCornerNone);
+  k_text(ctx, t, s_f18b, GRect(188 - w, y - 2, w - 4, 24), GTextAlignmentRight, K_PAPIER);
+}
+static void k_start_zeile(GContext *ctx, const Strecke *s, int i, int yy, int32_t now) {
+  const int v = s->del[i];
+  int bw = k_breite(s->lin[i], s_f18b) + 10;
+  if (bw < 28) bw = 28;
+  const int xt = 6 + bw + 6;
+  char zeit[8], buf[12], rs[8] = "";
+  int h, m;
+  const int vz = (v == AUSFALL || s_abfahrt == ABF_AKTUELL) ? 0 : v;   // aktuell: Zeit mit Verspätung, orange
+  berlin_hm(s->dep[i] - vz * 60, &h, &m);
+  snprintf(zeit, sizeof(zeit), "%02d:%02d", h, m);
+  if (v != AUSFALL) { const int min = (s->dep[i] - now) / 60; if (min < 100) snprintf(rs, sizeof(rs), "%d'", min); }
+  const int rand = rs[0] ? 194 - k_breite(rs, s_f28b) - 6 : 194;
+  lauf_k(ctx, s->endk[i][0] ? s->endk[i] : s->end[i], s_f18b, GRect(xt, yy - 4, rand - xt, 24), K_TINTE, K_PAPIER, yy, 18);   // zuerst
+  graphics_context_set_stroke_color(ctx, K_GRAU);
+  graphics_draw_line(ctx, GPoint(6, yy - 3), GPoint(194, yy - 3));
+  graphics_context_set_fill_color(ctx, v == AUSFALL ? K_GRAU : K_ROT);
+  graphics_fill_rect(ctx, GRect(6, yy + 3, bw, 24), 4, GCornersAll);
+  k_text(ctx, s->lin[i], s_f18b, GRect(6, yy + 1, bw, 24), GTextAlignmentCenter, GColorWhite);
+  int x = xt;
+  k_text(ctx, zeit, s_f14b, GRect(x, yy + 15, 60, 18), GTextAlignmentLeft, v == AUSFALL ? K_GRAU : (v != vz ? K_ORANGE : K_TINTE));
+  x += k_breite(zeit, s_f14b) + 4;
+  if (v == AUSFALL) k_text(ctx, "fällt aus", s_f14b, GRect(x, yy + 15, 90, 18), GTextAlignmentLeft, K_ROT);
+  else {
+    if (vz) { snprintf(buf, sizeof(buf), "%+d'", vz); k_text(ctx, buf, s_f14b, GRect(x, yy + 15, 40, 18), GTextAlignmentLeft, K_ORANGE); x += k_breite(buf, s_f14b) + 4; }
+    if (s->steig[i][0]) {
+      int sw = k_breite(s->steig[i], s_f14b) + 6;
+      if (sw < 13) sw = 13;
+      graphics_context_set_fill_color(ctx, K_DUNKEL);
+      graphics_fill_rect(ctx, GRect(x, yy + 19, sw, 13), 2, GCornersAll);
+      k_text(ctx, s->steig[i], s_f14b, GRect(x, yy + 15, sw, 16), GTextAlignmentCenter, K_PAPIER);
+    }
+  }
+  if (rs[0]) k_text(ctx, rs, s_f28b, GRect(100, yy - 3, 94, 34), GTextAlignmentRight, K_TINTE);
+}
+static void k_start(GContext *ctx) {
+  const int32_t now = jetzt();
+  const Strecke *s = &s_str[HIER];
+  char buf[16];
+  int idx[MAXD];
+  k_flaeche(ctx, GRect(0, 0, 200, 228), K_PAPIER);
+  const int n = naechste(s, now, idx);
+  for (int k = 0; k < n; k++) k_start_zeile(ctx, s, idx[k], ST_Y0 + k * ST_DY, now);
+  if (!n && s->status != ST_LADE)
+    k_text(ctx, s->status == ST_STANDORT ? "kein Standort" : "keine Fahrt", s_f18b, GRect(6, ST_Y0 + 4, 188, 24), GTextAlignmentLeft, K_DUNKEL);
+  k_kopf(ctx, k_name0(s), K_PAPIER);
+  if (s_hier_m > 0) { meter_text(buf, sizeof(buf), s_hier_m); k_text(ctx, buf, s_f18b, GRect(6, ST_SCHILD1 - 2, 80, 24), GTextAlignmentLeft, K_TINTE); }
+  k_schild(ctx, ST_SCHILD1, "Abfahrten");
+  k_schild(ctx, ST_SCHILD2, "Strecken");
+  k_anzeige_fuss(ctx);
+}
+
 // Info-Zeilen über einer Liste (0.7.0, Vorschlag nach verpasstem Anschluss); nur Klar und Phosphor
 static int info_n(void) { int n = s_linfo[0] ? 1 : 0; for (const char *c = s_linfo; *c; c++) n += *c == '|'; return n > 4 ? 4 : n; }
 static void info_zeile(int k, char *buf, size_t n) {
@@ -1005,6 +1074,23 @@ static int liste_versatz(void) {
   const int n = info_n();
   if (!n || s_modus != M_LISTE) return 0;
   return s_layout == LAYOUT_PHOSPHOR ? n * 16 + 6 : n * 20 + 4;
+}
+// Einstellung (0.15.0): oben der Name, darunter der Wert als Satzteil; gewählt: Balken, der Wert läuft, wenn zu lang
+static void k_zeile2(GContext *ctx, const char *t, int y, bool gew) {
+  char name[LTXT];
+  const char *bar = strchr(t, '|');
+  snprintf(name, sizeof(name), "%.*s", bar ? (int)(bar - t) : (int)strlen(t), t);
+  const char *wert = bar ? bar + 1 : "";
+  const GColor bg = gew ? K_TINTE : K_PAPIER, fg = gew ? K_PAPIER : K_TINTE;
+  if (gew) {
+    k_flaeche(ctx, GRect(0, y, 200, K_ZEILE2), bg);
+    lauf_k(ctx, wert, s_f14b, GRect(6, y + 16, 188, 20), fg, bg, y + 19, 18);
+  } else {
+    k_text(ctx, wert, s_f14b, GRect(6, y + 16, 188, 20), GTextAlignmentLeft, fg);
+    graphics_context_set_stroke_color(ctx, K_GRAU);
+    graphics_draw_line(ctx, GPoint(6, y + K_ZEILE2 - 1), GPoint(194, y + K_ZEILE2 - 1));
+  }
+  k_text(ctx, name, s_f18b, GRect(6, y - 3, 188, 24), GTextAlignmentLeft, fg);
 }
 static void k_liste(GContext *ctx) {
   char buf[32];
@@ -1023,12 +1109,14 @@ static void k_liste(GContext *ctx) {
     k_text(ctx, z, k == 1 ? s_f18b : s_f18, GRect(6, K_Y0 - 3 + k * 20, 188, 24), GTextAlignmentLeft, k == 1 ? K_TINTE : K_DUNKEL);
   }
   if (kv) k_flaeche(ctx, GRect(6, K_Y0 + kv - 3, 188, 1), K_GRAU);
-  for (int k = 0; k < LZEILEN && s_loben + k < s_lanz; k++) {
-    const int i = s_loben + k, y = K_Y0 + kv + k * K_ZEILE;
-    if (y + K_ZEILE > 208) break;
+  for (int k = 0; k < l_zeilen() && s_loben + k < s_lanz; k++) {
+    const int i = s_loben + k, y = K_Y0 + kv + k * l_hoehe();
+    if (y + l_hoehe() > 208) break;
     const char *t = s_ltext[i][0] ? s_ltext[i] : "...";
+    if (s_lzwei) { k_zeile2(ctx, t, y, i == s_lsel); continue; }
     if (i != s_lsel) {
-      k_text(ctx, t, s_f18, GRect(6, y - 3, 188, 24), GTextAlignmentLeft, K_TINTE);
+      if (trenner(i)) lauf_k(ctx, t, s_f18, GRect(6, y - 3, 188, 24), K_TINTE, K_PAPIER, y, K_ZEILE);   // Erklärzeile läuft (0.15.0)
+      else k_text(ctx, t, s_f18, GRect(6, y - 3, 188, 24), GTextAlignmentLeft, K_TINTE);
       graphics_context_set_stroke_color(ctx, K_GRAU);
       graphics_draw_line(ctx, GPoint(6, y + K_ZEILE - 1), GPoint(194, y + K_ZEILE - 1));
       continue;
@@ -1036,7 +1124,7 @@ static void k_liste(GContext *ctx) {
     k_flaeche(ctx, GRect(0, y, 200, K_ZEILE), K_TINTE);           // gewählte Zeile: Balken, Lauftext
     lauf_k(ctx, t, s_f18b, GRect(6, y - 3, 188, 24), K_PAPIER, K_TINTE, y, K_ZEILE);
   }
-  if (s_lanz > LZEILEN) snprintf(buf, sizeof(buf), "%d/%d", s_lsel + 1, s_lanz);
+  if (s_lanz > l_zeilen()) snprintf(buf, sizeof(buf), "%d/%d", s_lsel + 1, s_lanz);
   else buf[0] = '\0';
   k_fuss(ctx, buf, false, K_TINTE, 0);
 }
@@ -1136,7 +1224,7 @@ static void p_name(GContext *ctx, const char *vor, const char *name, int y, GCol
 }
 
 // Seite in Phosphor (0.50): AB Haltestelle, NACH Ziel; drei Abfahrten. Ohne Ziel je Fahrt das Endziel darunter.
-static void p_seite(GContext *ctx, const Strecke *s, time_t now) {
+static void p_seite(GContext *ctx, const Strecke *s, int32_t now) {
   const bool ziel = hat_ziel(s);
   p_name(ctx, "AB", s->name[0], 59, P_HELL);
   if (ziel) p_name(ctx, "NACH", s->name[1], 75, P_GRAU);
@@ -1200,7 +1288,7 @@ static void p_seite(GContext *ctx, const Strecke *s, time_t now) {
 }
 
 // Phosphor: Strecke (0.6.1) — NACH Ziel, AB Start; je Verbindung Losgehzeit groß, oben Ankunft, unten Linien
-static void p_route(GContext *ctx, const Route *r, time_t now) {
+static void p_route(GContext *ctx, const Route *r, int32_t now) {
   p_name(ctx, "NACH", r->name, 59, P_HELL);
   p_name(ctx, "AB", r->von[0] ? r->von : "HIER", 75, P_GRAU);
   p_punktlinie(ctx, 92);
@@ -1250,7 +1338,7 @@ static bool phosphor_einzeilig(const Zeile *z) {
   const int rand = 196 - (z->re[0] ? P_W(z->re, 2) + 6 + 4 : 0);
   return PD_NAME_X + P_W(z->text, 3) <= rand;
 }
-static void p_d_zeile(GContext *ctx, int b, int y, time_t now) {
+static void p_d_zeile(GContext *ctx, int b, int y, int32_t now) {
   const int i = s_bz[b] & 0x7F;
   const bool zweite = s_bz[b] & 0x80;
   const Zeile *z = &s_dz[i];
@@ -1299,7 +1387,7 @@ static bool punkt_einzeilig(const Zeile *z) {
   return KLAR_ART ? klar_einzeilig(z) : phosphor_einzeilig(z);
 }
 static void p_detail(GContext *ctx) {
-  const time_t now = time(NULL);
+  const int32_t now = jetzt();
   char li[16], re[16], fuss[40];
   k_flaeche(ctx, GRect(0, 0, 200, 228), P_HG);
   detail_kopftext(li, sizeof(li), re, sizeof(re), false);
@@ -1351,8 +1439,10 @@ static void p_rubrik(GContext *ctx) {
   p_text(ctx, F35, F35_N, F35_H, t, 100 - P_W(t, 2) / 2, 109, 2, P_HG, 0, 200);
 }
 
+static void p_anzeige_fuss(GContext *ctx);
 static void p_anzeige(GContext *ctx) {
-  const time_t now = time(NULL);
+  const time_t jt = time(NULL);                        // localtime braucht time_t
+  const int32_t now = (int32_t)jt;
   char buf[32], re[16] = "";
   int h, m, wt, tag, mon;
   k_flaeche(ctx, GRect(0, 0, 200, 228), P_HG);
@@ -1361,7 +1451,7 @@ static void p_anzeige(GContext *ctx) {
   snprintf(buf, sizeof(buf), "%s %02d.%02d.", WT[wt], tag, mon);
   P_KLEIN(buf, 4, 4, P_GRAU);
   berlin_hm(now, &h, &m);
-  const struct tm *lokal = localtime(&now);
+  const struct tm *lokal = localtime(&jt);
   const bool fremd = lokal->tm_hour != h || lokal->tm_min != m;
   seitenzeichen(re, sizeof(re), fremd);
   P_KLEIN(re, 196 - P_W(re, 2), 4, P_GRAU);
@@ -1387,7 +1477,12 @@ static void p_anzeige(GContext *ctx) {
     P_KLEIN("NEU ANLEGEN", 100 - P_W("NEU ANLEGEN", 2) / 2, 136, P_GRAU);
   }
 
-  // Fuß (0.8.0, wie in den anderen Ansichten): links Punkt und Quelle (cyan = Echtzeit), rechts der Stand
+  p_anzeige_fuss(ctx);
+  p_rubrik(ctx);
+}
+// Fuß (0.8.0, wie in den anderen Ansichten): links Punkt und Quelle (cyan = Echtzeit), rechts der Stand
+static void p_anzeige_fuss(GContext *ctx) {
+  char buf[32];
   int32_t stand_t = 0;
   const char *quelle = "";
   const int status = seiten_status(&stand_t, &quelle);
@@ -1410,9 +1505,71 @@ static void p_anzeige(GContext *ctx) {
     graphics_fill_rect(ctx, GRect(4, 215, 6, 6), 0, GCornerNone);
     P_KLEIN(buf, 14, 213, warn ? P_WARN : P_TEXT);
   }
-  p_rubrik(ctx);
+}
+static void p_schild(GContext *ctx, int y, const char *t) {   // Schild wie auf der Bestätigungsseite, 22 px hoch
+  const int w = P_W(t, 2) + 12;
+  graphics_context_set_fill_color(ctx, P_TEXT);
+  graphics_fill_rect(ctx, GRect(188 - w, y, w, 22), 0, GCornerNone);
+  for (int i = 0; i <= 10; i++) graphics_fill_rect(ctx, GRect(188 + i, y + i, 1, 22 - 2 * i), 0, GCornerNone);
+  P_KLEIN(t, 182 - P_W(t, 2), y + 6, P_HG);
+}
+static void p_start_zeile(GContext *ctx, const Strecke *s, int i, int yy, int32_t now) {
+  const int v = s->del[i];
+  const bool ausfall = v == AUSFALL;
+  const char *lin = s->lin[i];
+  const bool gross = gross_moeglich(lin);
+  const int lw = (gross ? P_GW(lin, 2) : P_W(lin, 2)) + 8;
+  graphics_context_set_fill_color(ctx, ausfall ? P_GRAU : P_TEXT);   // Linie invers wie auf der Seite
+  graphics_fill_rect(ctx, GRect(4, yy + 3, lw, 21), 0, GCornerNone);
+  if (gross) P_GROSS(lin, 8, yy + 6, 2, P_HG); else P_KLEIN(lin, 8, yy + 9, P_HG);
+  const int xt = 4 + lw + 6;
+  char zeit[8], buf[12], rs[8] = "";
+  int h, m;
+  const int vz = (ausfall || s_abfahrt == ABF_AKTUELL) ? 0 : v;   // aktuell: Zeit mit Verspätung, gelb
+  berlin_hm(s->dep[i] - vz * 60, &h, &m);
+  snprintf(zeit, sizeof(zeit), "%02d:%02d", h, m);
+  if (!ausfall) { const int min = (s->dep[i] - now) / 60; if (min < 100) snprintf(rs, sizeof(rs), "%d'", min); }
+  int rand = 196;
+  if (rs[0]) { rand = 196 - P_GW(rs, 3); P_GROSS(rs, rand, yy + 3, 3, P_TEXT); rand -= 6; }
+  lauf_p(ctx, s->end[i], xt, rand, yy + 2, 2, P_TEXT);
+  int x = xt;
+  P_KLEIN(zeit, x, yy + 15, ausfall ? P_GRAU : (v != vz ? P_WARN : P_GRAU));
+  x += P_W(zeit, 2) + 6;
+  if (ausfall) { P_KLEIN("FAELLT AUS", x, yy + 15, P_WARN); return; }
+  if (vz) { snprintf(buf, sizeof(buf), "%+d'", vz); P_KLEIN(buf, x, yy + 15, P_WARN); x += P_W(buf, 2) + 6; }
+  if (s->steig[i][0]) {
+    const int sw = P_W(s->steig[i], 2) + 6;
+    graphics_context_set_fill_color(ctx, P_GITTER);
+    graphics_fill_rect(ctx, GRect(x, yy + 13, sw, 14), 0, GCornerNone);
+    P_KLEIN(s->steig[i], x + 3, yy + 15, P_HELL);
+  }
+}
+static void p_start(GContext *ctx) {
+  const int32_t now = jetzt();
+  const Strecke *s = &s_str[HIER];
+  char buf[16];
+  int idx[MAXD];
+  k_flaeche(ctx, GRect(0, 0, 200, 228), P_HG);
+  p_kopf(ctx, s->name[0], P_TEXT);
+  if (s_hier_m > 0) { meter_text(buf, sizeof(buf), s_hier_m); P_KLEIN(buf, 4, ST_SCHILD1 + 6, P_GRAU); }
+  p_schild(ctx, ST_SCHILD1, "ABFAHRTEN");
+  const int n = naechste(s, now, idx);
+  for (int k = 0; k < n; k++) p_start_zeile(ctx, s, idx[k], ST_Y0 + k * ST_DY, now);
+  if (!n && s->status != ST_LADE) P_KLEIN(s->status == ST_STANDORT ? "KEIN STANDORT" : "KEINE FAHRT", 4, ST_Y0 + 8, P_GRAU);
+  p_schild(ctx, ST_SCHILD2, "STRECKEN");
+  p_anzeige_fuss(ctx);
 }
 
+static void p_zeile2(GContext *ctx, const char *t, int y, bool gew) {   // Einstellung: Name, darunter grau der Wert
+  char name[LTXT];
+  const char *bar = strchr(t, '|');
+  snprintf(name, sizeof(name), "%.*s", bar ? (int)(bar - t) : (int)strlen(t), t);
+  const char *wert = bar ? bar + 1 : "";
+  if (gew) { graphics_context_set_fill_color(ctx, P_TEXT); graphics_fill_rect(ctx, GRect(0, y + 1, 200, P_ZEILE2 - 2), 0, GCornerNone); }
+  p_text(ctx, F35, F35_N, F35_H, name, 6, y + 4, 2, gew ? P_HG : P_TEXT, 0, 194);
+  if (gew) lauf_p(ctx, wert, 6, 194, y + 17, 2, P_HG);
+  else p_text(ctx, F35, F35_N, F35_H, wert, 6, y + 17, 2, P_GRAU, 0, 194);
+}
 static void p_liste(GContext *ctx) {
   char buf[32];
   k_flaeche(ctx, GRect(0, 0, 200, 228), P_HG);
@@ -1428,18 +1585,23 @@ static void p_liste(GContext *ctx) {
       P_KLEIN(z, 4, P_Y0 + 4 + k * 16, k == 1 ? P_HELL : k == 2 ? P_TEXT : P_GRAU);
     }
     if (pv) p_punktlinie(ctx, P_Y0 + pv - 2);
-    for (int k = 0; k < LZEILEN && s_loben + k < s_lanz; k++) {
-      const int i = s_loben + k, y = P_Y0 + pv + k * P_ZEILE;
-      if (y + P_ZEILE > 207) break;
+    for (int k = 0; k < l_zeilen() && s_loben + k < s_lanz; k++) {
+      const int i = s_loben + k, y = P_Y0 + pv + k * l_hoehe();
+      if (y + l_hoehe() > 207) break;
       const char *t = s_ltext[i][0] ? s_ltext[i] : "...";
-      if (i != s_lsel) { p_text(ctx, F35, F35_N, F35_H, t, 6, y + 6, 2, P_TEXT, 0, 194); continue; }
+      if (s_lzwei) { p_zeile2(ctx, t, y, i == s_lsel); continue; }
+      if (i != s_lsel) {
+        if (trenner(i)) lauf_p(ctx, t, 6, 194, y + 6, 2, P_TEXT);   // Erklärzeile läuft, wenn zu lang (0.15.0)
+        else p_text(ctx, F35, F35_N, F35_H, t, 6, y + 6, 2, P_TEXT, 0, 194);
+        continue;
+      }
       graphics_context_set_fill_color(ctx, P_TEXT);                  // gewählte Zeile invers
       graphics_fill_rect(ctx, GRect(0, y + 1, 200, P_ZEILE - 2), 0, GCornerNone);
       lauf_p(ctx, t, 6, 194, y + 6, 2, P_HG);
     }
   }
   buf[0] = '\0';
-  if (s_modus == M_LISTE && s_lanz > LZEILEN) snprintf(buf, sizeof(buf), "%d/%d", s_lsel + 1, s_lanz);
+  if (s_modus == M_LISTE && s_lanz > l_zeilen()) snprintf(buf, sizeof(buf), "%d/%d", s_lsel + 1, s_lanz);
   p_fuss(ctx, buf, 0);
 }
 
@@ -1468,9 +1630,31 @@ static void p_frage(GContext *ctx) {
 }
 
 // ---------- Fahrtkarte (0.7.0) ----------
+// Halte zählt die Uhr selbst weiter (0.15.0, Seb 2026-10-15 im Bus: „noch n Halte“ und der nächste Halt hingen nach).
+// Mit der Karte kommen die Abfahrtszeiten der nächsten drei Halte bis zum Ausstieg (K_HT) und ihre Namen (K_HN). Ab
+// seiner Abfahrtszeit gilt ein Halt als vorbei: Zahl, nächster Halt und Balken im Verlauf rücken sofort weiter, ohne
+// auf das Handy zu warten. Kommt eine neue Antwort mit anderen Zeiten, gelten die neuen. Für alle Ansichten an einer Stelle.
+static int karte_vorbei(void) {                        // so viele der gemeldeten Halte sind schon vorbei
+  const int32_t now = jetzt();
+  int p = 0;
+  while (p < 3 && s_k->ht[p] && s_k->ht[p] <= now) p++;
+  return p;
+}
+static int karte_halte(void) {                         // Halte bis zum Ausstieg (mit ihm), 0 = keine Angabe
+  if (s_k->halte <= 0) return 0;
+  const int h = s_k->halte - karte_vorbei();
+  return h < 1 ? 1 : h;
+}
+static const char *karte_r2(void) {                    // rechts oben: nächster Halt (vom Handy oder weitergezählt)
+  const int p = karte_vorbei();
+  if (!p) return s_k->r2;
+  if (p >= s_k->halte - 1) return s_k->name;           // nur noch der Ausstieg
+  return p < 3 && s_k->hn[p][0] ? s_k->hn[p] : "...";  // Namen aufgebraucht: das Handy wird gefragt (halt_cb)
+}
 static void karte_zahl(char *zahl, size_t nz, const char **einheit, bool *warn) {
-  if (s_k->halte >= 1 && s_k->halte <= 3) { snprintf(zahl, nz, "%d", s_k->halte); *einheit = T("HALTE", s_k->halte == 1 ? "Halt" : "Halte"); *warn = true; return; }
-  int m = (int)((s_k->zeit - time(NULL) + 59) / 60);
+  const int halte = karte_halte();
+  if (halte >= 1 && halte <= 3) { snprintf(zahl, nz, "%d", halte); *einheit = T("HALTE", halte == 1 ? "Halt" : "Halte"); *warn = true; return; }
+  int m = (s_k->zeit - jetzt() + 59) / 60;
   if (m < 0) m = 0;
   if (m > 999) m = 999;
   snprintf(zahl, nz, "%d", m);
@@ -1499,8 +1683,9 @@ static void p_karte(GContext *ctx) {
   karte_unter(buf, sizeof(buf));
   P_KLEIN(buf, 4, 62, P_GRAU);
   if (s_k->r1[0]) P_KLEIN(s_k->r1, 196 - P_W(s_k->r1, 2), 30, s_k->rf ? P_HELL : P_GRAU);
-  if (s_k->r2[0] && P_W(s_k->r2, 2) <= 110) P_KLEIN(s_k->r2, 196 - P_W(s_k->r2, 2), 46, s_k->rf ? P_GRAU : P_HELL);
-  else if (s_k->r2[0]) lauf_p(ctx, s_k->r2, 86, 196, 46, 2, s_k->rf ? P_GRAU : P_HELL);   // zu lang: Lauftext
+  const char *r2 = karte_r2();
+  if (r2[0] && P_W(r2, 2) <= 110) P_KLEIN(r2, 196 - P_W(r2, 2), 46, s_k->rf ? P_GRAU : P_HELL);
+  else if (r2[0]) lauf_p(ctx, r2, 86, 196, 46, 2, s_k->rf ? P_GRAU : P_HELL);   // zu lang: Lauftext
   p_punktlinie(ctx, 78);
   P_KLEIN(s_k->label, 4, 88, P_GRAU);
   if (s_k->steig[0]) p_steig(ctx, s_k->steig, 88);
@@ -1538,11 +1723,12 @@ static void k_karte(GContext *ctx) {
   bool warn;
   k_flaeche(ctx, GRect(0, 0, 200, 228), K_PAPIER);
   k_kopf(ctx, s_k->kopf, K_PAPIER);                   // 0.8.0: rechts die Uhrzeit, die Ankunft steht im Fuß
-  if (s_k->r2[0]) {                                    // rechts: nächster Halt bzw. Fußweg, zu lang: Lauftext (zuerst)
+  const char *r2 = karte_r2();
+  if (r2[0]) {                                         // rechts: nächster Halt bzw. Fußweg, zu lang: Lauftext (zuerst)
     const GFont f2 = s_rf_font(!s_k->rf);
     const GColor c2 = s_k->rf ? K_DUNKEL : K_TINTE;
-    if (k_breite(s_k->r2, f2) <= 114) k_text(ctx, s_k->r2, f2, GRect(80, 44, 114, 24), GTextAlignmentRight, c2);
-    else lauf_k(ctx, s_k->r2, f2, GRect(80, 44, 114, 24), c2, K_PAPIER, 49, 16);
+    if (k_breite(r2, f2) <= 114) k_text(ctx, r2, f2, GRect(80, 44, 114, 24), GTextAlignmentRight, c2);
+    else lauf_k(ctx, r2, f2, GRect(80, 44, 114, 24), c2, K_PAPIER, 49, 16);
   }
   karte_zahl(zahl, sizeof(zahl), &einheit, &warn);
   const GColor zc = warn ? K_ROT : K_TINTE;
@@ -1577,245 +1763,20 @@ static void k_karte(GContext *ctx) {
   k_fuss(ctx, s_k->fuss, false, K_TINTE, s_dstand);
 }
 
-// ---------- Ansicht „Signal“ (0.14.0, Entwurf linie8-signal-entwurf.png) ----------
-// Kopf: Name groß auf dem Grund, Uhrzeit grau, Akzentlinie; darunter klein „nach …“ bzw. Rubrik und rechts die Seite.
-// Drei Zeilen je SIG_DY: Linienkästchen in Linienfarbe, oben Zeit (mit Ziel) bzw. Endziel, unten klein Steig/Zeit,
-// rechts die Minuten groß. Die nächste Abfahrt steht auf einer Karte in Schriftfarbe (wie die gewählte Menüzeile).
-#define SIG_Y0 52
-#define SIG_DY 52
-static GColor linienfarbe(const char *lin) {           // feste Farbe je Linienname (keine Linienfarben vom Handy)
-  static const uint32_t F[] = { 0x0055FF, 0xAA00AA, 0xFF5500, 0x005555, 0xAA0000, 0x5500AA };
-  uint32_t h = 0;
-  for (; *lin; lin++) h = h * 31 + (uint8_t)*lin;
-  return hex(F[h % ARRAY_LENGTH(F)]);
-}
-static int sig_kasten_w(const char *lin) { int w = k_breite(lin, s_f18b) + 10; return w < 28 ? 28 : w > 60 ? 60 : w; }
-static int sig_kasten(GContext *ctx, const char *lin, int x, int y) {   // Linienkästchen, gibt die rechte Kante zurück
-  const int w = sig_kasten_w(lin);
-  graphics_context_set_fill_color(ctx, linienfarbe(lin));
-  graphics_fill_rect(ctx, GRect(x, y, w, 22), 4, GCornersAll);
-  k_text(ctx, lin, s_f18b, GRect(x, y - 3, w, 24), GTextAlignmentCenter, GColorWhite);
-  return x + w;
-}
-// Karte der nächsten Abfahrt: Fläche in Schriftfarbe, danach die Farben für den umgekehrten Grund. Rückgabe: alte Palette
-static Palette sig_karte_an(GContext *ctx, int yy) {
-  const Palette alt = s_pal;
-  graphics_context_set_fill_color(ctx, K_TINTE);
-  graphics_fill_rect(ctx, GRect(4, yy + 1, 192, SIG_DY - 4), 7, GCornersAll);
-  sig_farben(!s_invers);
-  s_lauf_x0 = 6; s_lauf_x1 = 194;
-  return alt;
-}
-// Rechts: Minuten groß, "min" klein. zeichnen = false: nur die linke Kante (vor den Lauftexten, die rechts übermalen)
-static int sig_minuten(GContext *ctx, int32_t t, time_t now, int yy, bool zeichnen) {
-  const int min = rest_min(t, now);
-  if (min >= 100) return 192;
-  char rs[8];
-  snprintf(rs, sizeof(rs), "%d", min);
-  const int ew = k_breite("min", s_f14b), zw = k_breite(rs, s_f_uhr);
-  if (zeichnen) {
-    k_text(ctx, "min", s_f14b, GRect(192 - ew, yy + 22, ew + 2, 18), GTextAlignmentLeft, K_DUNKEL);
-    k_text(ctx, rs, s_f_uhr, GRect(190 - ew - zw - 2, yy + 3, zw + 4, 40), GTextAlignmentRight, K_TINTE);
-  }
-  return 190 - ew - zw - 6;
-}
-static void sig_kopf(GContext *ctx, const char *titel, const char *unter) {
-  char uhr[8], sz[16];
-  uhr_text(uhr, sizeof(uhr));
-  const int uw = k_breite(uhr, s_f18b) + 6;
-  lauf_k(ctx, titel, s_f24b, GRect(6, -5, 194 - uw - 6, 30), K_TINTE, K_PAPIER, 0, 28);
-  k_text(ctx, uhr, s_f18b, GRect(194 - uw, 0, uw, 24), GTextAlignmentRight, K_DUNKEL);
-  k_flaeche(ctx, GRect(6, 28, 188, 2), SIG_AKZENT);
-  seitenzeichen(sz, sizeof(sz), false);
-  const int sw = k_breite(sz, s_f14b) + 4;
-  lauf_k(ctx, unter, s_f14b, GRect(6, 31, 188 - sw, 18), K_DUNKEL, K_PAPIER, 32, 17);
-  k_text(ctx, sz, s_f14b, GRect(194 - sw, 31, sw, 18), GTextAlignmentRight, K_DUNKEL);
-}
-static void sig_seite(GContext *ctx, const Strecke *s, time_t now) {
-  const bool ziel = hat_ziel(s);
-  char unter[NAMELEN + 8];
-  if (ziel) snprintf(unter, sizeof(unter), "nach %s", k_name1(s));
-  else snprintf(unter, sizeof(unter), "%s", s_hier ? "Abfahrten hier" : "Abfahrten");
-  sig_kopf(ctx, k_name0(s), unter);
-  int idx[MAXD];
-  const int n = naechste(s, now, idx);
-  for (int k = 0; k < MAXD; k++) {
-    const int yy = SIG_Y0 + k * SIG_DY;
-    if (vt_str(s)[0] && k == MAXD - 1) { k_vorschlag(ctx, vt_str(s), yy + 4); continue; }
-    if (k >= n) {
-      if (k == 0) k_text(ctx, "keine Fahrt", s_f18b, GRect(8, yy + 10, 184, 24), GTextAlignmentLeft, K_DUNKEL);
-      continue;
-    }
-    const Palette alt = k == 0 ? sig_karte_an(ctx, yy) : s_pal;
-    const GColor grund = K_PAPIER;
-    const int i = idx[k], v = s->del[i];
-    const int xt = 10 + sig_kasten_w(s->lin[i]) + 6;
-    char zeit[16], unten[40], buf[12];
-    int h, m;
-    const int vz = (v == AUSFALL || s_abfahrt == ABF_AKTUELL) ? 0 : v;   // aktuell: Zeit mit Verspätung, orange
-    berlin_hm(s->dep[i] - vz * 60, &h, &m);
-    snprintf(zeit, sizeof(zeit), "%02d:%02d", h, m);
-    const int rand = v == AUSFALL ? 192 : sig_minuten(ctx, s->dep[i], now, yy, false);
-    const GColor zc = v == AUSFALL ? K_DUNKEL : (v != vz ? K_ORANGE : K_TINTE);
-    buf[0] = '\0';
-    if (vz != 0) snprintf(buf, sizeof(buf), "%+d'", vz);
-    unten[0] = '\0';                                   // unten: Steig und Fahrtdauer (ohne Ziel hinter der Zeit)
-    if (s->steig[i][0]) snprintf(unten, sizeof(unten), "Steig %s", s->steig[i]);
-    if (ziel && s_dauer && s->dur[i] > 0) snprintf(unten + strlen(unten), sizeof(unten) - strlen(unten), "%s%d' Fahrt", unten[0] ? " · " : "", s->dur[i]);
-    if (ziel) {
-      lauf_k(ctx, unten, s_f14b, GRect(xt, yy + 27, rand - xt, 18), K_DUNKEL, grund, yy + 29, 16);   // Lauftexte zuerst
-      k_text(ctx, zeit, s_f24b, GRect(xt, yy - 1, 80, 30), GTextAlignmentLeft, zc);
-      if (buf[0]) k_text(ctx, buf, s_f18b, GRect(xt + k_breite(zeit, s_f24b) + 3, yy + 4, 40, 24), GTextAlignmentLeft, K_ORANGE);
-    } else {                                           // ohne Ziel: oben das Endziel, unten Zeit, Verspätung, Steig
-      const int xs = xt + k_breite(zeit, s_f14b) + 4 + (buf[0] ? k_breite(buf, s_f14b) + 4 : 0);
-      if (unten[0]) lauf_k(ctx, unten, s_f14b, GRect(xs, yy + 27, rand - xs, 18), K_DUNKEL, grund, yy + 29, 16);
-      lauf_k(ctx, s->endk[i][0] ? s->endk[i] : s->end[i], s_f18b, GRect(xt, yy + 3, rand - xt, 24), K_TINTE, grund, yy + 6, 18);
-      k_text(ctx, zeit, s_f14b, GRect(xt, yy + 27, 60, 18), GTextAlignmentLeft, gcolor_equal(zc, K_TINTE) ? K_DUNKEL : zc);
-      if (buf[0]) k_text(ctx, buf, s_f14b, GRect(xt + k_breite(zeit, s_f14b) + 4, yy + 27, 40, 18), GTextAlignmentLeft, K_ORANGE);
-    }
-    sig_kasten(ctx, s->lin[i], 10, yy + 14);
-    if (v != AUSFALL) sig_minuten(ctx, s->dep[i], now, yy, true);
-    if (v == AUSFALL) k_text(ctx, "fällt aus", s_f18b, GRect(100, yy + 12, 92, 24), GTextAlignmentRight, K_ROT);
-    if (k > 0 && k < MAXD - 1) k_flaeche(ctx, GRect(10, yy + SIG_DY - 2, 180, 1), K_GRAU);
-    s_pal = alt;
-    s_lauf_x0 = 0; s_lauf_x1 = 200;
-  }
-}
-static void sig_route(GContext *ctx, const Route *r, time_t now) {
-  char unter[NAMELEN + 8];
-  snprintf(unter, sizeof(unter), "ab %s", k_rvon(r));
-  sig_kopf(ctx, k_rziel(r), unter);
-  int idx[MAXD];
-  const int n = route_naechste(r, now, idx);
-  for (int k = 0; k < MAXD; k++) {
-    const int yy = SIG_Y0 + k * SIG_DY;
-    if (vt_rt(r)[0] && k == MAXD - 1) { k_vorschlag(ctx, vt_rt(r), yy + 4); continue; }
-    if (k >= n) {
-      if (k == 0 && r->status != ST_LADE)
-        k_text(ctx, r->status == ST_STANDORT ? "kein Standort" : "keine Verbindung", s_f18b, GRect(8, yy + 10, 184, 24), GTextAlignmentLeft, K_DUNKEL);
-      continue;
-    }
-    const Palette alt = k == 0 ? sig_karte_an(ctx, yy) : s_pal;
-    const GColor grund = K_PAPIER;
-    const int i = idx[k];
-    const bool ausfall = r->del[i] == AUSFALL;
-    // Kästchen: die ganze Linienkette, wenn sie passt, sonst die erste Linie
-    char lin[LINLEN + 4];
-    const char *ke = r->kette[i];
-    int j = 0;
-    while (ke[j] && ke[j] != ' ' && j < (int)sizeof(lin) - 1) { lin[j] = ke[j]; j++; }
-    lin[j] = '\0';
-    const char *kasten = k_breite(ke, s_f18b) + 10 <= 60 ? ke : (lin[0] ? lin : "?");
-    const int xt = 10 + sig_kasten_w(kasten) + 6;
-    char zeit[8], an[32], buf[12];
-    int h, m;
-    berlin_hm(r->los[i], &h, &m); snprintf(zeit, sizeof(zeit), "%02d:%02d", h, m);
-    const int rand = sig_minuten(ctx, r->los[i], now, yy, false);
-    berlin_hm(r->an[i], &h, &m);
-    const char *warn = route_warnung(r, i, true);
-    if (warn[0]) snprintf(an, sizeof(an), "an %02d:%02d · %s", h, m, warn);
-    else if (r->um[i]) snprintf(an, sizeof(an), "an %02d:%02d · %d Umst.", h, m, r->um[i]);
-    else snprintf(an, sizeof(an), "an %02d:%02d · direkt", h, m);
-    lauf_k(ctx, an, s_f14b, GRect(xt, yy + 27, rand - xt, 18), warn[0] ? K_ROT : K_DUNKEL, grund, yy + 29, 16);
-    k_text(ctx, zeit, s_f24b, GRect(xt, yy - 1, 80, 30), GTextAlignmentLeft, ausfall ? K_DUNKEL : K_TINTE);
-    if (r->del[i] > 0 && !ausfall) {
-      snprintf(buf, sizeof(buf), "+%d'", r->del[i]);
-      k_text(ctx, buf, s_f18b, GRect(xt + k_breite(zeit, s_f24b) + 3, yy + 4, 40, 24), GTextAlignmentLeft, K_ORANGE);
-    }
-    sig_kasten(ctx, kasten, 10, yy + 14);
-    sig_minuten(ctx, r->los[i], now, yy, true);
-    if (k > 0 && k < MAXD - 1) k_flaeche(ctx, GRect(10, yy + SIG_DY - 2, 180, 1), K_GRAU);
-    s_pal = alt;
-    s_lauf_x0 = 0; s_lauf_x1 = 200;
-  }
-}
-static void sig_anzeige(GContext *ctx) {
-  const time_t now = time(NULL);
-  k_flaeche(ctx, GRect(0, 0, 200, 228), K_PAPIER);
-  if (s_rubrik == 1 && zeigt_route()) sig_route(ctx, aktuelle_route(), now);
-  else if (s_rubrik != 1 && zeigt_seite()) sig_seite(ctx, aktuelle(), now);
-  else {
-    sig_kopf(ctx, s_rubrik == 1 ? "Strecken" : "Abfahrten", "");
-    if ((s_rubrik == 1 ? s_ranzahl : s_anzahl) == 0) {
-      k_text(ctx, s_rubrik == 1 ? "Keine Strecken" : "Keine Abfahrten", s_f24b, GRect(0, 74, 200, 30), GTextAlignmentCenter, K_TINTE);
-      graphics_context_set_text_color(ctx, K_DUNKEL);
-      graphics_draw_text(ctx, "Select lang öffnet das Menü: Neu anlegen", s_f18, GRect(16, 108, 168, 50),
-                         GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
-    }
-  }
-  k_anzeige_fuss(ctx);
-  k_rubrik(ctx);
-}
-// Fahrtkarte in Signal: links ein Ring, der sich bis zum Ziel des Countdowns füllt, darin die Zahl; rechts wie in
-// Papier oben rechts (nächster Halt bzw. Fußweg) und die Zeile darunter; dann Name groß und die Zeilen vom Handy.
-static int32_t s_ring_ziel, s_ring_dauer;            // Ring: Countdown-Ziel und Dauer ab dem ersten Bild dazu
-static void sig_karte(GContext *ctx) {
-  char zahl[8], buf[48];
-  const char *einheit;
-  bool warn;
-  const time_t now = time(NULL);
-  k_flaeche(ctx, GRect(0, 0, 200, 228), K_PAPIER);
-  k_kopf(ctx, s_k->kopf, K_PAPIER);
-  if (s_k->zeit != s_ring_ziel) { s_ring_ziel = s_k->zeit; s_ring_dauer = s_k->zeit - now > 60 ? s_k->zeit - now : 60; }
-  int32_t anteil = 0;                                   // 0 .. TRIG_MAX_ANGLE
-  if (s_ring_ziel && s_ring_dauer > 0) {
-    const int32_t rest = s_ring_ziel - now > 0 ? s_ring_ziel - now : 0;
-    anteil = (int32_t)((int64_t)TRIG_MAX_ANGLE * (s_ring_dauer - (rest < s_ring_dauer ? rest : s_ring_dauer)) / s_ring_dauer);
-  }
-  // rechts: oben r1, darunter r2 (nächster Halt bzw. Fußweg), dann die Zeile unter der Zahl. Lauftexte zuerst: sie
-  // übermalen links ihre Zeile bis zum Rand, der Ring kommt danach darüber (sonst Balken durch den Ring bzw. Text im
-  // Ring, gefunden von Seb 2026-10-13)
-  if (s_k->r2[0]) lauf_k(ctx, s_k->r2, s_rf_font(!s_k->rf), GRect(96, 52, 98, 24), s_k->rf ? K_DUNKEL : K_TINTE, K_PAPIER, 56, 18);
-  if (s_k->r1[0]) k_text(ctx, s_k->r1, s_rf_font(s_k->rf), GRect(96, 32, 98, 24), GTextAlignmentLeft, s_k->rf ? K_TINTE : K_DUNKEL);
-  karte_unter(buf, sizeof(buf));
-  lauf_k(ctx, buf, s_f14b, GRect(96, 78, 98, 18), K_DUNKEL, K_PAPIER, 80, 16);
-  karte_zahl(zahl, sizeof(zahl), &einheit, &warn);
-  const GRect ring = GRect(8, 32, 80, 80);
-  graphics_context_set_fill_color(ctx, K_GRAU);
-  graphics_fill_radial(ctx, ring, GOvalScaleModeFitCircle, 8, 0, TRIG_MAX_ANGLE);
-  if (anteil > 0) {
-    graphics_context_set_fill_color(ctx, warn ? K_ROT : SIG_AKZENT);
-    graphics_fill_radial(ctx, ring, GOvalScaleModeFitCircle, 8, 0, anteil);
-  }
-  k_text(ctx, zahl, s_f_uhr, GRect(8, 44, 80, 40), GTextAlignmentCenter, warn ? K_ROT : K_TINTE);
-  k_text(ctx, einheit, s_f14b, GRect(8, 78, 80, 18), GTextAlignmentCenter, K_DUNKEL);
-  k_text(ctx, s_k->label, s_f14b, GRect(6, 114, 140, 18), GTextAlignmentLeft, K_DUNKEL);
-  const int nr = s_k->steig[0] ? 196 - k_steig_w(s_k->steig) - 4 : 194;
-  lauf_k(ctx, s_k->name, k_breite(s_k->name, s_f24b) <= nr - 6 ? s_f24b : s_f18b, GRect(6, 125, nr - 6, 30), K_TINTE, K_PAPIER, 131, 24);
-  if (s_k->steig[0]) k_steig_box(ctx, s_k->steig, 132);
-  int y = 160;
-  for (int i = 0; i < KZ; i++) {
-    const uint8_t f = s_k->f[i];
-    if (!(f & 128)) continue;
-    if (f & 8) { k_flaeche(ctx, GRect(6, y, 188, 1), K_GRAU); y += 3; }
-    if (y > 192) break;
-    const GColor wc = (f & 16) ? K_ROT : (f & 32) ? K_DUNKEL : K_TINTE;
-    const GFont wf = (f & 64) ? s_f18b : s_f18;
-    if (f & 4) { lauf_k(ctx, s_k->w[i], (f & 16) ? s_f18b : wf, GRect(6, y - 3, 188, 24), wc, K_PAPIER, y + 1, 16); y += 17; continue; }
-    int rand = 194, rw = 0;
-    if (s_k->s[i][0]) rand = 196 - k_steig_w(s_k->s[i]) - 4;
-    else if (s_k->r[i][0]) { rw = k_breite(s_k->r[i], s_f18b); rand = 194 - rw - 6; }
-    lauf_k(ctx, s_k->w[i], wf, GRect(44, y - 3, rand - 44, 24), wc, K_PAPIER, y + 1, 16);
-    k_text(ctx, s_k->l[i], s_f14b, GRect(6, y, 40, 18), GTextAlignmentLeft, K_DUNKEL);
-    if (s_k->s[i][0]) k_steig_box(ctx, s_k->s[i], y);
-    else if (rw) k_text(ctx, s_k->r[i], s_f18b, GRect(194 - rw, y - 3, rw + 2, 24), GTextAlignmentRight, (f & 1) ? K_ROT : K_TINTE);
-    y += 17;
-  }
-  k_fuss(ctx, s_k->fuss, false, K_TINTE, s_dstand);
-}
-
 static void lauf_cb(void *data);
+static void ab_planen(void);
 static void zeichnen(Layer *layer, GContext *ctx) {
   s_lauf_bedarf = false;                               // die Seiten melden beim Zeichnen, ob ein Text laufen muss
   if (KLAR_ART) {
-    if (s_modus == M_ANZEIGE) { if (SIGNAL) sig_anzeige(ctx); else k_anzeige(ctx); }
-    else if (s_modus == M_DETAIL) { if (karte_zeigen()) { if (SIGNAL) sig_karte(ctx); else k_karte(ctx); } else k_detail(ctx); }
+    if (s_modus == M_ANZEIGE) { if (s_start) k_start(ctx); else k_anzeige(ctx); }
+    else if (s_modus == M_DETAIL) { if (karte_zeigen()) k_karte(ctx); else k_detail(ctx); }
     else if (s_modus == M_SUCHE) k_suche(ctx); else if (s_modus == M_FRAGE) k_frage(ctx); else k_liste(ctx);
   } else {
-    if (s_modus == M_ANZEIGE) p_anzeige(ctx); else if (s_modus == M_DETAIL) { if (karte_zeigen()) p_karte(ctx); else p_detail(ctx); }
+    if (s_modus == M_ANZEIGE) { if (s_start) p_start(ctx); else p_anzeige(ctx); } else if (s_modus == M_DETAIL) { if (karte_zeigen()) p_karte(ctx); else p_detail(ctx); }
     else if (s_modus == M_SUCHE) p_suche(ctx); else if (s_modus == M_FRAGE) p_frage(ctx); else p_liste(ctx);
   }
   if (s_lauf_bedarf && !s_lauf && s_lauf_rest >= LAUF_MS) s_lauf = app_timer_register(LAUF_MS, lauf_cb, NULL);
+  if (s_modus == M_ANZEIGE) ab_planen();
 }
 
 // ---------- Lauftext: Zeitgeber ----------
@@ -1863,6 +1824,7 @@ static void warten_starten(void) {
 // wird bis zu 10-mal nachgefasst.
 #define A_REQUEST 0
 static char s_offen_text[48];
+static bool s_neu, s_offen_neu;     // NEU (0.15.0): Anfrage nach einer Abfahrt, das Handy umgeht seinen Puffer
 static int detail_nr(void) { return s_modus == M_DETAIL ? s_dnr : -1; }
 static bool aktion_schreiben(void) {
   DictionaryIterator *it;
@@ -1875,6 +1837,7 @@ static bool aktion_schreiben(void) {
   dict_write_int32(it, MESSAGE_KEY_RUBRIK, s_fahrt && s_modus == M_DETAIL ? RUBRIK_FAHRT : s_rubrik);
   dict_write_int32(it, MESSAGE_KEY_DETAIL, detail_nr());
   if (s_offen_text[0]) dict_write_cstring(it, MESSAGE_KEY_TEXT, s_offen_text);
+  if (s_offen_neu) dict_write_int32(it, MESSAGE_KEY_NEU, 1);
   return app_message_outbox_send() == APP_MSG_OK;
 }
 
@@ -1888,6 +1851,7 @@ static void sende_cb(void *data) {
 static void abschicken(int aktion, int wahl, const char *text) {
   s_offen_aktion = aktion;
   s_offen_wahl = wahl;
+  s_offen_neu = s_neu;
   s_offen_versuche = 0;
   snprintf(s_offen_text, sizeof(s_offen_text), "%s", text ? text : "");
   if (s_sendetimer) { app_timer_cancel(s_sendetimer); s_sendetimer = NULL; }
@@ -1898,6 +1862,7 @@ static void aktion_abschicken(int aktion, int wahl) { abschicken(aktion, wahl, N
 
 // Gezeigte Seite (und offene Details) beim Handy anfordern. still: Statuszeile bleibt (automatisch jede Minute)
 static void anfordern_mit(bool still) {
+  s_lade_t = jetzt();
   if (s_fahrt && s_modus == M_DETAIL) { abschicken(A_REQUEST, 0, NULL); return; }
   if (s_rubrik == 0 && s_hier) abschicken(A_HIER, s_hier_nr, NULL);
   else if (s_rubrik == 1 && s_sofort) abschicken(A_SOFORT_NR, s_sofort_nr, NULL);
@@ -1905,6 +1870,7 @@ static void anfordern_mit(bool still) {
   if (!still && (s_rubrik == 1 ? zeigt_route() : zeigt_seite())) warten_starten();
 }
 static void anfordern(void) { anfordern_mit(false); }
+static void anfordern_neu(void) { s_neu = true; anfordern_mit(true); s_neu = false; }   // nach einer Abfahrt, ohne Puffer
 
 static int begrenzen(int32_t v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : (int)v; }
 
@@ -1921,15 +1887,42 @@ static void ruhe_neu(void) {
 }
 static void ruhe_cb(void *data) {
   s_ruhe = NULL;
-  if (!s_schliessen) return;                         // Standard: bleibt offen; nächste Taste stellt die Zeit neu
-  const bool konfig = s_konfig && time(NULL) - s_konfig < KONFIG_S;
+  if (s_ohne >= 0) return;                           // Standard: bleibt offen; nächste Taste stellt die Zeit neu
+  const bool konfig = s_konfig && jetzt() - s_konfig < KONFIG_S;
   // 0.7.1: in der aktiven Fahrt (Karte, Verlauf, ihre Menüs) keine Ruhe-Zeit — raus nur mit Zurück (Wunsch Seb)
   if ((s_modus == M_LADE && !s_lade_abgelaufen) || konfig || s_diktat_an || s_fahrt) { ruhe_neu(); return; }
   exit_reason_set(APP_EXIT_ACTION_PERFORMED_SUCCESSFULLY);   // direkt zum Watchface, nicht ins App-Menü
   window_stack_pop_all(true);
 }
-static void taste(void) { s_taste = time(NULL); s_beruehrt = true; ruhe_neu(); lauf_starten(); }   // jede Taste: Lauftext von vorn
+static void taste(void) { s_taste = jetzt(); s_beruehrt = true; ruhe_neu(); lauf_starten(); }   // jede Taste: Lauftext von vorn
 static bool seite_da(void) { return s_rubrik == 1 ? zeigt_route() : zeigt_seite(); }
+static bool laden_erlaubt(void) {                      // OHNE TASTE: 0 immer, sonst bis so viele Minuten nach der letzten Taste
+  return s_ohne == 0 || jetzt() - s_taste < (s_ohne > 0 ? s_ohne : 5) * 60;   // „nach 10 s schließen“: höchstens 5 min
+}
+// NACH ABFAHRT (0.15.0): Zeitgeber auf den Moment, in dem die oberste Abfahrt bzw. Verbindung aus der Liste fällt; dann
+// neu laden, am Handy am Puffer vorbei (bis 0.14.0 standen bis zum nächsten Laden nur zwei da). Gestellt beim Zeichnen.
+static AppTimer *s_ab_timer;
+static int32_t s_ab_ziel;
+static int32_t oberste_weg(void) {
+  int idx[MAXD];
+  const int32_t now = jetzt();
+  if (s_rubrik == 1) { const Route *r = aktuelle_route(); return route_naechste(r, now, idx) ? r->los[idx[0]] + 61 : 0; }
+  const Strecke *s = aktuelle();
+  return naechste(s, now, idx) ? s->dep[idx[0]] + 1 : 0;
+}
+static void ab_cb(void *data) {
+  s_ab_timer = NULL;
+  if (s_modus == M_ANZEIGE && seite_da() && laden_erlaubt()) anfordern_neu();
+  layer_mark_dirty(s_layer);                           // zeichnen() stellt den Zeitgeber auf die nächste
+}
+static void ab_planen(void) {
+  const int32_t t = s_nachab && seite_da() ? oberste_weg() : 0;
+  if (t == s_ab_ziel && (s_ab_timer || !t)) return;
+  if (s_ab_timer) { app_timer_cancel(s_ab_timer); s_ab_timer = NULL; }
+  s_ab_ziel = t;
+  const int32_t dt = t - jetzt();
+  if (t && dt < 3600) s_ab_timer = app_timer_register(dt > 0 ? dt * 1000 : 100, ab_cb, NULL);
+}
 
 // ---------- Uhr-Menü ----------
 static void lade_stoppen(void) {
@@ -1959,6 +1952,7 @@ static void liste_beginnen(int art, const char *titel) {
   s_lanz = s_lsel = s_loben = 0;
   s_linfo[0] = '\0';
   s_lfrage = 0;
+  s_lzwei = false;
   strncpy(s_ltitel, titel, LTXT - 1);
   s_ltitel[LTXT - 1] = '\0';
 }
@@ -1970,10 +1964,9 @@ static void eintrag(const char *t, int aktion) {
   s_lakt[s_lanz++] = aktion;
 }
 
-static bool trenner(int i) { return !strncmp(s_ltext[i], "-- ", 3); }   // Zwischenüberschrift vom Handy
 static void liste_fertig(int sel) {
   s_lsel = sel < s_lanz ? sel : 0;
-  if (s_lsel >= LZEILEN) s_loben = s_lsel - LZEILEN + 1;
+  if (s_lsel >= l_zeilen()) s_loben = s_lsel - l_zeilen() + 1;
   lauf_starten();
   layer_mark_dirty(s_layer);
 }
@@ -2010,7 +2003,7 @@ static bool ist_fav(int32_t maske, int bit) { return bit >= 0 && bit < 31 && ((m
 static void menue_zeigen(void) {
   char buf[2 * NAMELEN + 16], name[2 * NAMELEN + 4];
   s_aus_einst = false;
-  const bool fahrt = s_fahrt_ende > time(NULL);
+  const bool fahrt = s_fahrt_ende > jetzt();
   if (s_rubrik == 1) {
     if (s_sofort) {                                      // Strecke ab hier
       const Route *r = &s_rt[HIER];
@@ -2041,9 +2034,10 @@ static void menue_zeigen(void) {
   } else {
     if (s_hier) {                                        // Abfahrten hier
       const Strecke *s = &s_str[HIER];
-      liste_beginnen(L_MENUE, T("ABFAHRTEN HIER", "Abfahrten hier"));
+      liste_beginnen(L_MENUE, s_start ? T("STARTSEITE", "Startseite") : T("ABFAHRTEN HIER", "Abfahrten hier"));
       if (fahrt) eintrag(T("AKTIVE FAHRT", "Aktive Fahrt"), A_FAHRT_ZEIGEN);
       if (s_hier_n > 0) eintrag(T("WEITERE FAHRTEN", "Weitere Fahrten"), A_FAHRTEN);
+      if (s_start) eintrag(T("ABFAHRTEN HIER", "Abfahrten hier"), A_HIER_START);   // die 10 nächsten, hoch/runter
       eintrag(T("NEU ANLEGEN", "Neu anlegen"), A_NEU);
       if (s_hier_n > 0) eintrag(T("ABFAHRT SPEICHERN", "Abfahrt speichern"), A_SOFORT_SPEICHERN);
       if (s_hier_n > 0 && !ist_fav(s_sfav, 0)) { bit_name(buf, sizeof(buf), T("FAVORIT: ", "Favorit: "), s->name[0], s->klar[0]); eintrag(buf, A_FAV_A); }
@@ -2115,102 +2109,154 @@ static void umkreis_text(char *buf, size_t n, const char *vor, int m) {   // "UM
   else snprintf(buf, n, T("%s%dM", "%s%d m"), vor, m);
 }
 
-// Einstellungen (0.8.0): Anzeige >, Quelle, Umkreis (gilt für beide Rubriken), Abfahrten >, Strecken >, Favoriten >
-static void einstellungen_zeigen(int sel) {
+// ---------- Einstellungen (0.15.0): oben nur Rubriken, darunter je Einstellung zwei Zeilen ----------
+// Wunsch Seb 2026-10-15: EINSTELLUNGEN zeigt nur noch Rubriken (Anzeige, Aktualisieren, Abfahrten, Strecken, Favoriten,
+// Suche, Daten). In einer Rubrik steht jede Einstellung mit Namen und darunter dem Wert als Satzteil. Select: zwei Werte
+// schalten direkt um, mehr öffnen die Werteliste — oben eine Erklärzeile wie -- FAVORITEN --, die Auswahl steht auf dem
+// aktuellen Wert. Danach zurück in die Rubrik. Bis 0.14.0 einzeilig, Quelle und Umkreis lose in EINSTELLUNGEN.
+#define EIGEN 99           // OHNE TASTE: Eintrag „nach … min“ der Werteliste öffnet die Zahl (1–60 min)
+typedef struct { uint8_t rub, n; const char *name, *namek, *erkl, *erklk; int16_t w[5]; } Einst;
+static const Einst EINST[S_N] = {
+  [S_STARTSEITE] = { L_ANZEIGE, 2, "STARTSEITE", "Startseite", NULL, NULL, { 0, 1 } },
+  [S_ANSICHT]    = { L_ANZEIGE, 2, "ANSICHT", "Ansicht", NULL, NULL, { LAYOUT_PAPIER, LAYOUT_PHOSPHOR } },
+  [S_INVERS]     = { L_ANZEIGE, 2, "INVERTIERT", "Invertiert", NULL, NULL, { 0, 1 } },
+  [S_KONTRAST]   = { L_ANZEIGE, 2, "HOHER KONTRAST", "Hoher Kontrast", NULL, NULL, { 0, 1 } },
+  [S_ABFAHRT]    = { L_ANZEIGE, 2, "ABFAHRTSZEIT", "Abfahrtszeit", NULL, NULL, { ABF_PLAN, ABF_AKTUELL } },
+  [S_DAUER]      = { L_ANZEIGE, 2, "FAHRTDAUER", "Fahrtdauer", NULL, NULL, { 1, 0 } },
+  [S_REGEL]      = { L_AKTU, 4, "REGELMAESSIG", "Regelmäßig", "-- SEITE VON SELBST NEU LADEN --", "-- Seite von selbst neu laden --", { 1, 2, 5, 0 } },
+  [S_NACHAB]     = { L_AKTU, 2, "NACH ABFAHRT", "Nach Abfahrt", NULL, NULL, { 1, 0 } },
+  [S_OHNE]       = { L_AKTU, 4, "OHNE TASTE", "Ohne Taste", "-- WENN KEINE TASTE GEDRUECKT WIRD --", "-- Wenn keine Taste gedrückt wird --", { -1, 5, EIGEN, 0 } },
+  [S_UMKREIS]    = { L_SUCHE, 3, "UMKREIS", "Umkreis", "-- SO WEIT LAEUFST DU HOECHSTENS --", "-- So weit läufst du höchstens --", { 500, 1000, 2000 } },
+  [S_UMSTIEGE]   = { L_SUCHE, 5, "UMSTIEGE", "Umstiege", "-- SO OFT UMSTEIGEN HOECHSTENS --", "-- So oft umsteigen höchstens --", { 0, 1, 2, 3, 9 } },
+  [S_FUSSWEG]    = { L_SUCHE, 4, "FUSSWEG", "Fußweg", "-- ZU FUSS AM ANFANG UND ENDE --", "-- Zu Fuß am Anfang und Ende --", { 5, 10, 15, 20 } },
+  [S_UMSTZEIT]   = { L_SUCHE, 3, "UMSTIEGSZEIT", "Umstiegszeit", "-- ZEIT ZUM UMSTEIGEN --", "-- Zeit zum Umsteigen --", { 2, 5, 10 } },
+  [S_QUELLE]     = { L_DATEN, 3, "QUELLE", "Quelle", "-- WOHER DIE ABFAHRTEN KOMMEN --", "-- Woher die Abfahrten kommen --", { QUELLE_AUTO, QUELLE_RMV, QUELLE_TRANS } },
+};
+// Wert als Satzteil: zweite Zeile in der Rubrik und Eintrag der Werteliste
+static void wert_text(int s, int v, char *b, size_t n) {
+  const char *t = "";
+  switch (s) {
+    case S_STARTSEITE: t = v ? T("AN, HALTESTELLE IN DER NAEHE", "an: Haltestelle in der Nähe") : T("AUS", "aus"); break;
+    case S_ANSICHT: t = v == LAYOUT_PHOSPHOR ? T("PHOSPHOR", "Phosphor") : T("PAPIER", "Papier"); break;
+    case S_INVERS: t = v ? T("AN, SCHWARZ AUF WEISS", "an: weiß auf Schwarz") : T("AUS", "aus"); break;
+    case S_KONTRAST: t = v ? T("AN, KEINE GRAUE SCHRIFT", "an: keine graue Schrift") : T("AUS", "aus"); break;
+    case S_ABFAHRT: t = v == ABF_AKTUELL ? T("AKTUELL, MIT VERSPAETUNG", "aktuell, mit Verspätung") : T("FAHRPLAN, VERSPAETUNG DAHINTER", "Fahrplan, Verspätung dahinter"); break;
+    case S_DAUER: t = v ? T("AN", "an") : T("AUS", "aus"); break;
+    case S_REGEL:
+      if (v > 1) { snprintf(b, n, T("ALLE %d MIN", "alle %d min"), v); return; }
+      t = v ? T("JEDE MINUTE", "jede Minute") : T("NUR BEIM OEFFNEN", "nur beim Öffnen");
+      break;
+    case S_NACHAB: t = v ? T("JA, GLEICH NEU LADEN", "ja, gleich neu laden") : T("NEIN", "nein"); break;
+    case S_OHNE:
+      if (v > 0 && v != EIGEN) { snprintf(b, n, T("NACH %d MIN NICHT MEHR LADEN", "nach %d min nicht mehr laden"), v); return; }
+      t = v < 0 ? T("NACH 10 S SCHLIESSEN", "nach 10 s schließen") : v ? T("NACH ... MIN NICHT MEHR LADEN", "nach … min nicht mehr laden")
+                : T("IMMER WEITER LADEN", "immer weiter laden");
+      break;
+    case S_UMKREIS: umkreis_text(b, n, "", v); return;
+    case S_UMSTIEGE:
+      if (v > 0 && v < 9) { snprintf(b, n, T("HOECHSTENS %d", "höchstens %d"), v); return; }
+      t = v ? T("BELIEBIG", "beliebig") : T("KEINE, NUR DIREKT", "keine, nur direkt");
+      break;
+    case S_FUSSWEG: snprintf(b, n, T("HOECHSTENS %d MIN", "höchstens %d min"), v); return;
+    case S_UMSTZEIT: snprintf(b, n, T("MINDESTENS %d MIN", "mindestens %d min"), v); return;
+    case S_QUELLE: t = v == QUELLE_RMV ? T("NUR RMV", "nur RMV") : v == QUELLE_TRANS ? T("NUR TRANSITOUS", "nur Transitous")
+                                       : T("AUTO: RMV, SONST TRANSITOUS", "Auto: RMV, sonst Transitous"); break;
+  }
+  snprintf(b, n, "%s", t);
+}
+static int einst_wert(int s) {
+  switch (s) {
+    case S_STARTSEITE: return s_startseite;
+    case S_ANSICHT: return s_layout;
+    case S_INVERS: return s_invers;
+    case S_KONTRAST: return s_kontrast;
+    case S_ABFAHRT: return s_abfahrt;
+    case S_DAUER: return s_dauer;
+    case S_REGEL: return s_regel;
+    case S_NACHAB: return s_nachab;
+    case S_OHNE: return s_ohne;
+    case S_UMKREIS: return s_umkreis;
+    case S_UMSTIEGE: return s_umstiege;
+    case S_FUSSWEG: return s_fussweg;
+    case S_UMSTZEIT: return s_umstzeit;
+    default: return s_quelle;
+  }
+}
+static const char *rub_name(int art) {
+  switch (art) {
+    case L_ANZEIGE: return T("ANZEIGE", "Anzeige");
+    case L_AKTU: return T("AKTUALISIEREN", "Aktualisieren");
+    case L_EABF: return T("ABFAHRTEN", "Abfahrten");
+    case L_ESTR: return T("STRECKEN", "Strecken");
+    case L_SUCHE: return T("SUCHE", "Suche");
+    case L_DATEN: return T("DATEN", "Daten");
+    default: return T("FAVORITEN", "Favoriten");
+  }
+}
+// Reihenfolge der Rubriken; Favoriten ist eine Liste vom Handy (L_HANDY steht hier nur als Kennung)
+static const uint8_t E_RUB[] = { L_ANZEIGE, L_AKTU, L_EABF, L_ESTR, L_HANDY, L_SUCHE, L_DATEN };
+static void einstellungen_zeigen(int art) {            // art: Rubrik, auf der die Auswahl steht
   char buf[LTXT];
+  int k = 0;
   s_aus_einst = false;                                 // Favoriten-Ablauf ist vorbei (setzt A_FAVORITEN neu)
   liste_beginnen(L_EINST, T("EINSTELLUNGEN", "Einstellungen"));
-  eintrag(T("ANZEIGE >", "Anzeige >"), A_ANZ);
-  eintrag(s_quelle == QUELLE_RMV ? T("QUELLE: NUR RMV", "Quelle: nur RMV") :
-          s_quelle == QUELLE_TRANS ? T("QUELLE: NUR TRANSITOUS", "Quelle: nur Transitous") : T("QUELLE: AUTO", "Quelle: Auto"), A_QLL);
-  umkreis_text(buf, sizeof(buf), T("UMKREIS: ", "Umkreis: "), s_umkreis);
-  eintrag(buf, A_UMK);
-  eintrag(T("ABFAHRTEN >", "Abfahrten >"), A_EABF);
-  eintrag(T("STRECKEN >", "Strecken >"), A_ESTR);
-  eintrag(T("FAVORITEN >", "Favoriten >"), A_FAVORITEN);
-  liste_fertig(sel);
+  for (unsigned i = 0; i < sizeof(E_RUB); i++) {
+    if (E_RUB[i] == art) k = i;
+    snprintf(buf, sizeof(buf), "%s >", rub_name(E_RUB[i]));
+    s_lwert[s_lanz] = E_RUB[i];
+    eintrag(buf, E_RUB[i] == L_HANDY ? A_FAVORITEN : A_RUB);
+  }
+  liste_fertig(k);
 }
-
-// Einstellungen > Anzeige. Schalter: Select schaltet um, man bleibt in der Liste; Ansicht: eigene Auswahl.
-// sel = Aktion des Eintrags, auf dem die Auswahl stehen soll (Hoher Kontrast fehlt in Papier, das hat nie Grau).
-static void anzeigemenue_zeigen(int sel) {
-  liste_beginnen(L_ANZEIGE, T("ANZEIGE", "Anzeige"));
-  eintrag(T("ANSICHT: PHOSPHOR", SIGNAL ? "Ansicht: Signal" : "Ansicht: Papier"), A_ANSICHT);
-  eintrag(s_invers ? T("INVERTIERT: AN", "Invertiert: an") : T("INVERTIERT: AUS", "Invertiert: aus"), A_INVERS_UM);
-  if (s_layout == LAYOUT_PHOSPHOR) eintrag(s_kontrast ? "HOHER KONTRAST: AN" : "HOHER KONTRAST: AUS", A_KONTRAST_UM);
-  eintrag(s_abfahrt == ABF_AKTUELL ? T("ABFAHRT: AKTUELL", "Abfahrt: aktuell") : T("ABFAHRT: FAHRPLAN", "Abfahrt: Fahrplan"), A_ABF_UM);
-  eintrag(s_dauer ? T("FAHRTDAUER: AN", "Fahrtdauer: an") : T("FAHRTDAUER: AUS", "Fahrtdauer: aus"), A_DAUER_UM);
-  eintrag(s_schliessen ? T("APP SCHLIESSEN: NACH 10 S OHNE TASTE", "App schließen: nach 10 s ohne Taste")
-                       : T("APP SCHLIESSEN: NIE VON SELBST", "App schließen: nie von selbst"), A_SCHLIESSEN_UM);
-  int k = 0;
-  while (k < s_lanz && s_lakt[k] != sel) k++;
-  liste_fertig(k < s_lanz ? k : 0);
-}
-
 static void alle_text(char *buf, size_t n, int anzahl) {   // "ALLE 8 LOESCHEN"
   snprintf(buf, n, T("ALLE %d LOESCHEN", "Alle %d löschen"), anzahl);
 }
-static void eabf_zeigen(void) {                        // Einstellungen > Abfahrten (0.8.0: Umkreis eine Ebene höher)
-  char buf[LTXT];
-  liste_beginnen(L_EABF, T("ABFAHRTEN", "Abfahrten"));
-  if (s_anzahl > 0) { alle_text(buf, sizeof(buf), s_anzahl); eintrag(buf, A_F_ALLE_ABF); }
-  else eintrag(T("KEINE GESPEICHERT", "Keine gespeichert"), A_EINST);
-  liste_fertig(0);
-}
-
-static void estrecke_zeigen(int sel) {                 // Einstellungen > Strecken (Verbindungssuche, alle löschen)
-  char buf[LTXT];
-  liste_beginnen(L_ESTRECKE, T("STRECKEN", "Strecken"));
-  if (s_umstiege == 9) snprintf(buf, sizeof(buf), "%s", T("UMSTIEGE: BELIEBIG", "Umstiege: beliebig"));
-  else snprintf(buf, sizeof(buf), T("UMSTIEGE: MAX %d", "Umstiege: höchstens %d"), s_umstiege);
-  eintrag(buf, A_UMST_W);
-  snprintf(buf, sizeof(buf), T("FUSSWEG: MAX %d'", "Fußweg: höchstens %d min"), s_fussweg);
-  eintrag(buf, A_FUSS_W);
-  snprintf(buf, sizeof(buf), T("UMSTIEGSZEIT: %d'", "Umstiegszeit: %d min"), s_umstzeit);
-  eintrag(buf, A_UZEIT_W);
-  if (s_ranzahl > 0) { alle_text(buf, sizeof(buf), s_ranzahl); eintrag(buf, A_F_ALLE_STR); }
-  liste_fertig(sel);
-}
-
-static const int16_t UMST_W[] = { 0, 1, 2, 3, 9 }, FUSS_W[] = { 5, 10, 15, 20 }, UZEIT_W[] = { 2, 5, 10 };
-static void werte_zeigen(int art, const char *titel, const int16_t *w, int n, int aktuell) {
-  char buf[LTXT];
-  int sel = 0;
-  liste_beginnen(art, titel);
-  for (int i = 0; i < n; i++) {
-    if (art == L_UMST && w[i] == 9) snprintf(buf, sizeof(buf), "%s", T("BELIEBIG", "beliebig"));
-    else if (art == L_UMST) snprintf(buf, sizeof(buf), "%d", w[i]);
-    else snprintf(buf, sizeof(buf), T("%d'", "%d min"), w[i]);
-    s_lwert[s_lanz] = w[i];
-    eintrag(buf, A_SET_V);
-    if (w[i] == aktuell) sel = i;
+static void rubrik_zeigen(int art, int sel) {          // eine Rubrik; sel: Einstellung, auf der die Auswahl steht
+  char buf[LTXT], w[LTXT];
+  int k = 0;
+  liste_beginnen(art, rub_name(art));
+  if (art == L_EABF || art == L_ESTR) {                // Abfahrten, Strecken: nur alle löschen (Bestätigungsseite)
+    const int n = art == L_EABF ? s_anzahl : s_ranzahl;
+    if (n > 0) { alle_text(buf, sizeof(buf), n); eintrag(buf, art == L_EABF ? A_F_ALLE_ABF : A_F_ALLE_STR); }
+    else eintrag(T("KEINE GESPEICHERT", "Keine gespeichert"), 0);
+  } else {
+    s_lzwei = true;
+    for (int s = 0; s < S_N; s++) {
+      if (EINST[s].rub != art || (s == S_KONTRAST && s_layout != LAYOUT_PHOSPHOR)) continue;   // Papier hat nie Grau
+      wert_text(s, einst_wert(s), w, sizeof(w));
+      snprintf(buf, sizeof(buf), "%s|%s", T(EINST[s].name, EINST[s].namek), w);
+      if (s == sel) k = s_lanz;
+      s_lwert[s_lanz] = s;
+      eintrag(buf, A_EINST_S);
+    }
   }
-  liste_fertig(sel);
+  liste_fertig(k);
 }
-
-static void quelle_zeigen(void) {                      // Quelle der Abfahrten, aktuelle vorausgewählt
-  liste_beginnen(L_QUELLE, T("QUELLE", "Quelle"));
-  eintrag(T("AUTO", "Auto"), A_SET_QAUTO);             // RMV mit Schlüssel, bei Fehler Transitous
-  eintrag(T("NUR RMV", "nur RMV"), A_SET_QRMV);
-  eintrag(T("NUR TRANSITOUS", "nur Transitous"), A_SET_QTRANS);
-  liste_fertig(s_quelle);
-}
-
-static void umkreis_zeigen(void) {                     // Umkreis um den Start, aktueller vorausgewählt
+static int s_lset;                 // Einstellung der offenen Werteliste
+static void werte_zeigen(int s) {
   char buf[LTXT];
-  liste_beginnen(L_UMKREIS, T("UMKREIS", "Umkreis"));
-  umkreis_text(buf, sizeof(buf), "", 500);  eintrag(buf, A_SET_U500);
-  umkreis_text(buf, sizeof(buf), "", 1000); eintrag(buf, A_SET_U1000);
-  umkreis_text(buf, sizeof(buf), "", 2000); eintrag(buf, A_SET_U2000);
-  liste_fertig(s_umkreis == 500 ? 0 : s_umkreis == 2000 ? 2 : 1);
+  const Einst *e = &EINST[s];
+  const int v = einst_wert(s);
+  int k = 1;
+  s_lset = s;
+  liste_beginnen(L_WERTE, T(e->name, e->namek));
+  eintrag(T(e->erkl, e->erklk), 0);                   // Erklärzeile, nicht wählbar
+  for (int i = 0; i < e->n; i++) {
+    const int w = e->w[i];
+    const bool eigen = s == S_OHNE && w == EIGEN, akt = eigen ? (v > 0 && v != 5) : w == v;   // eigene Angabe: n ≠ 5
+    wert_text(s, eigen && akt ? v : w, buf, sizeof(buf));
+    if (akt) k = s_lanz;
+    s_lwert[s_lanz] = w;
+    eintrag(buf, A_WERT);
+  }
+  liste_fertig(k);
 }
-
-static void ansicht_zeigen(void) {                     // Auswahl der Ansicht, die aktuelle vorausgewählt
-  liste_beginnen(L_ANSICHT, T("ANSICHT", "Ansicht"));
-  eintrag(T("PAPIER", "Papier"), A_SET_PAPIER);
-  eintrag(T("PHOSPHOR", "Phosphor"), A_SET_PWEISS);
-  eintrag(T("SIGNAL", "Signal"), A_SET_SIGNAL);
-  liste_fertig(s_layout == LAYOUT_PHOSPHOR ? 1 : SIGNAL ? 2 : 0);
+static void zahl_zeigen(void) {                        // OHNE TASTE, eigene Angabe: 1–60 min, hoch/runter, Select übernimmt
+  liste_beginnen(L_ZAHL, T("OHNE TASTE", "Ohne Taste"));
+  snprintf(s_ltext[0], LTXT, "%s", T("-- NACH SO VIELEN MINUTEN --", "-- Nach so vielen Minuten --"));
+  for (int i = 1; i <= 60; i++) snprintf(s_ltext[i], LTXT, T("%d MIN", "%d min"), i);
+  s_lanz = 61;
+  liste_fertig(s_ohne > 0 ? s_ohne : 10);
 }
 
 static void aktion_senden(int aktion, int wahl) {      // mit Antwort vom Handy: LADE zeigen
@@ -2220,10 +2266,9 @@ static void aktion_senden(int aktion, int wahl) {      // mit Antwort vom Handy:
 
 static void layout_setzen(int v) {
   const int b = v & 7;
-  s_layout = (b == 2 || b == 4) ? LAYOUT_PHOSPHOR : b == 6 ? LAYOUT_SIGNAL : LAYOUT_PAPIER;   // Phosphor grün -> weiß; LED, Klar -> Papier (0.13.0)
+  s_layout = (b == 2 || b == 4) ? LAYOUT_PHOSPHOR : LAYOUT_PAPIER;   // Phosphor grün -> weiß; LED, Klar, Signal -> Papier
   s_invers = b != 0 && b != 3 && (v & LW_INVERS);      // LED invertiert war dunkel auf hell, also Klar normal
   s_kontrast = (v & LW_KONTRAST) != 0;
-  s_schliessen = (v & LW_SCHLIESSEN) != 0;
   farben_setzen();
   persist_write_int(PK_LAYOUT, layout_wert());
   if (s_dn > 0) {                                      // Umbruch der Halte hängt an der Schrift der Ansicht
@@ -2256,51 +2301,58 @@ static void strecken_setzen(int umst, int fuss, int uzeit) {   // Werte der Verb
   persist_write_int(PK_UMSTZEIT, s_umstzeit);
 }
 
-static void wert_waehlen(int art, int v) {             // an der Uhr gewählt: merken, Handy Bescheid geben (lädt neu)
-  if (art == L_UMST) { strecken_setzen(v, s_fussweg, s_umstzeit); aktion_abschicken(A_UMSTIEGE, s_umstiege); estrecke_zeigen(ES_UMSTIEGE); }
-  else if (art == L_FUSS) { strecken_setzen(s_umstiege, v, s_umstzeit); aktion_abschicken(A_FUSSWEG, s_fussweg); estrecke_zeigen(ES_FUSSWEG); }
-  else { strecken_setzen(s_umstiege, s_fussweg, v); aktion_abschicken(A_UMSTZEIT, s_umstzeit); estrecke_zeigen(ES_UMSTZEIT); }
-}
-
-static void abfahrt_umschalten(void) {                 // an der Uhr: sofort wirksam, Handy merkt es sich für die Seite
-  abfahrt_setzen(s_abfahrt == ABF_AKTUELL ? ABF_PLAN : ABF_AKTUELL);
-  aktion_abschicken(A_ABFAHRT, s_abfahrt);
-  anzeigemenue_zeigen(A_ABF_UM);
-}
-
-static void dauer_umschalten(void) {
-  dauer_setzen(!s_dauer);
-  aktion_abschicken(A_DAUER, s_dauer ? 1 : 0);
-  anzeigemenue_zeigen(A_DAUER_UM);
-}
-
 static void quelle_setzen(int v) {
   s_quelle = (v == QUELLE_RMV || v == QUELLE_TRANS) ? v : QUELLE_AUTO;
   persist_write_int(PK_QUELLE, s_quelle);
 }
 
-static void quelle_waehlen(int v) {                    // an der Uhr gewählt: Handy lädt die Seite neu
-  quelle_setzen(v);
-  aktion_abschicken(A_QUELLE, s_quelle);
-  menue_verlassen();                                   // 0.8.0: dorthin, wo das Menü geöffnet wurde (auch die Fahrt)
-  if (s_modus == M_ANZEIGE && seite_da()) warten_starten();
+// AKTU (Nachricht und Speicher, 0.15.0): Bit 0–3 Minuten REGELMAESSIG (0 = nur beim Öffnen), Bit 4 NACH ABFAHRT,
+// Bit 5 STARTSEITE, Bit 8–15 OHNE TASTE + 1 (0 = nach 10 s schließen, 1 = immer weiter laden, sonst Minuten + 1)
+static int aktu_wert(void) { return s_regel | (s_nachab ? 16 : 0) | (s_startseite ? 32 : 0) | ((s_ohne + 1) << 8); }
+static void aktu_setzen(int v) {
+  const int r = v & 15, o = ((v >> 8) & 255) - 1;
+  s_regel = (r == 0 || r == 1 || r == 2 || r == 5) ? r : 1;
+  s_nachab = (v & 16) != 0;
+  s_startseite = (v & 32) != 0;
+  s_ohne = (o >= -1 && o <= 60) ? o : 5;
+  persist_write_int(PK_AKTU, aktu_wert());
 }
 
-static void umkreis_waehlen(int m) {
-  umkreis_setzen(m);
-  aktion_abschicken(A_UMKREIS, s_umkreis);
-  einstellungen_zeigen(E_UMKREIS);
+// An der Uhr gewählt: sofort wirksam und gespeichert, das Handy merkt es sich für Seite und Einrichtung (lädt bei Bedarf neu)
+static void einst_setzen(int s, int v) {
+  switch (s) {
+    case S_ANSICHT: case S_INVERS: case S_KONTRAST: {
+      int w = layout_wert();
+      const int bit = s == S_INVERS ? LW_INVERS : LW_KONTRAST;
+      if (s == S_ANSICHT) w = (w & LW_SCHALTER) | (v == LAYOUT_PHOSPHOR ? 4 : 5);
+      else w = v ? (w | bit) : (w & ~bit);
+      layout_setzen(w);
+      aktion_abschicken(A_LAYOUT, layout_wert());
+      return;
+    }
+    case S_ABFAHRT: abfahrt_setzen(v); aktion_abschicken(A_ABFAHRT, s_abfahrt); return;
+    case S_DAUER: dauer_setzen(v); aktion_abschicken(A_DAUER, s_dauer ? 1 : 0); return;
+    case S_UMKREIS: umkreis_setzen(v); aktion_abschicken(A_UMKREIS, s_umkreis); return;
+    case S_UMSTIEGE: strecken_setzen(v, s_fussweg, s_umstzeit); aktion_abschicken(A_UMSTIEGE, s_umstiege); return;
+    case S_FUSSWEG: strecken_setzen(s_umstiege, v, s_umstzeit); aktion_abschicken(A_FUSSWEG, s_fussweg); return;
+    case S_UMSTZEIT: strecken_setzen(s_umstiege, s_fussweg, v); aktion_abschicken(A_UMSTZEIT, s_umstzeit); return;
+    case S_QUELLE: quelle_setzen(v); aktion_abschicken(A_QUELLE, s_quelle); return;
+    default:                                           // Startseite und Aktualisieren: ein Wert für alle
+      if (s == S_STARTSEITE) s_startseite = v; else if (s == S_REGEL) s_regel = v; else if (s == S_NACHAB) s_nachab = v; else s_ohne = v;
+      aktu_setzen(aktu_wert());
+      aktion_abschicken(A_AKTU, aktu_wert());
+  }
 }
-
-static void layout_waehlen(int v) {                    // Grundansicht; Invertiert und Kontrast bleiben
-  layout_setzen(v | (layout_wert() & LW_SCHALTER));
-  aktion_abschicken(A_LAYOUT, layout_wert());
-  menue_verlassen();
+static void einst_waehlen(int s) {                     // Select auf eine Einstellung
+  const Einst *e = &EINST[s];
+  if (e->n != 2) { werte_zeigen(s); return; }
+  einst_setzen(s, einst_wert(s) == e->w[0] ? e->w[1] : e->w[0]);
+  rubrik_zeigen(e->rub, s);
 }
-static void farbe_umschalten(int bit, int sel) {        // Invertiert, Hoher Kontrast, App schließen: man bleibt in der Liste
-  layout_setzen(layout_wert() ^ bit);
-  aktion_abschicken(A_LAYOUT, layout_wert());
-  anzeigemenue_zeigen(sel);
+static void wert_waehlen(int v) {                      // in der Werteliste gewählt
+  if (s_lset == S_OHNE && v == EIGEN) { zahl_zeigen(); return; }
+  einst_setzen(s_lset, v);
+  rubrik_zeigen(EINST[s_lset].rub, s_lset);
 }
 
 // ---------- Suche: Buchstabenrad und Diktat (0.6.1) ----------
@@ -2369,8 +2421,10 @@ static void hier_starten(void) {                       // Haltestellen: Platz HI
   memset(s, 0, sizeof(*s));
   strcpy(s->name[0], "STANDORT");
   strcpy(s->klar[0], "Standort ...");
+  s_hier_start = s_start;                              // von der Startseite: Zurück führt dorthin (0.15.0)
+  s_start = false;
   s_rubrik = 0; s_hier = true; s_sofort = false;
-  s_hier_nr = s_hier_n = 0;
+  s_hier_nr = s_hier_n = s_hier_m = 0;
   anzeige_zeigen();
   anfordern();
 }
@@ -2385,7 +2439,7 @@ static void sofort_starten(int k) {                    // Strecken: Platz HIER, 
   memset(r, 0, sizeof(*r));
   strcpy(r->name, "...");
   strcpy(r->klar, "...");
-  s_rubrik = 1; s_sofort = true; s_hier = false;
+  s_rubrik = 1; s_sofort = true; s_hier = s_start = false;
   s_sofort_nr = k; s_sofort_n = 0;
   anzeige_zeigen();
   warten_starten();                                    // das Handy lädt schon von selbst
@@ -2394,6 +2448,42 @@ static void sofort_beenden(void) {
   s_sofort = false;
   lauf_starten();
   if (s_ranzahl > 0) anfordern();
+  layer_mark_dirty(s_layer);
+}
+
+// ---------- Startseite (0.15.0) ----------
+// Inhalt und Menü wie ABFAHRTEN HIER (Platz HIER, Nummer 0). Hoch = Rubrik Abfahrten, Runter = Rubrik Strecken, jeweils
+// mit der Seite, die das Handy nach Standort wählt (E1); Zurück auf einer Seite = Startseite, auf der Startseite = App
+// verlassen. Ohne Standort beim Öffnen oder mit Schalter aus: wie bisher die letzte Rubrik. Die aktive Fahrt geht vor.
+static void rubrik_cb(void *data);
+static void start_zeigen(bool anfragen) {
+  Strecke *s = &s_str[HIER];
+  if (!s_hier || s_hier_nr != 0 || !s->name[0][0]) {   // anderer Inhalt im Platz HIER: leeren, bis das Handy antwortet
+    memset(s, 0, sizeof(*s));
+    strcpy(s->name[0], "STANDORT");
+    strcpy(s->klar[0], "Standort ...");
+    s->status = ST_LADE;
+    s_hier_m = 0;
+  }
+  s_start = s_hier = true; s_rubrik = 0; s_sofort = false; s_hier_nr = 0;
+  anzeige_zeigen();
+  if (anfragen) anfordern();
+}
+static void start_verlassen(int rub) {                 // Hoch/Runter: zur Rubrik, ihr Name 1 s groß
+  s_start = s_hier = false;
+  s_rubrik = rub;
+  persist_write_int(PK_RUBRIK, rub);
+  if (s_rubrik_timer) app_timer_cancel(s_rubrik_timer);
+  s_rubrik_timer = app_timer_register(RUBRIK_MS, rubrik_cb, NULL);
+  lauf_starten();
+  if (seite_da()) anfordern();
+  layer_mark_dirty(s_layer);
+}
+static void start_abbrechen(void) {                    // Startseite geht nicht: wie bisher die zuletzt genutzte Rubrik
+  s_start = s_hier = false;
+  s_rubrik = persist_exists(PK_RUBRIK) && persist_read_int(PK_RUBRIK) == 1 ? 1 : 0;
+  lauf_starten();
+  if (seite_da()) anfordern();
   layer_mark_dirty(s_layer);
 }
 
@@ -2460,7 +2550,7 @@ static bool menue_empfangen(DictionaryIterator *it) {
     else if (n == -3) rad_starten(ti ? ti->value->cstring : "");
     else if (n == -4) diktat_starten();
     else if (n == -5) { Tuple *w = dict_find(it, MESSAGE_KEY_WAHL); sofort_starten(w ? w->value->int32 : 0); }
-    else if (n < 0) { if (s_aus_einst) einstellungen_zeigen(E_FAVORITEN); else menue_wieder(); }   // Ablauf am Handy beendet
+    else if (n < 0) { if (s_aus_einst) einstellungen_zeigen(L_HANDY); else menue_wieder(); }   // Ablauf am Handy beendet (Favoriten: L_HANDY)
     else {
       liste_beginnen(L_HANDY, ti ? ti->value->cstring : "");
       text_kopieren(s_linfo, sizeof(s_linfo), dict_find(it, MESSAGE_KEY_L_INFO));
@@ -2508,7 +2598,7 @@ static void liste_bewegen(int d) {
   s_lsel = (s_lsel + d + s_lanz) % s_lanz;             // am Ende wieder oben
   for (int n = 0; n < s_lanz && trenner(s_lsel); n++) s_lsel = (s_lsel + d + s_lanz) % s_lanz;   // Überschriften überspringen
   if (s_lsel < s_loben) s_loben = s_lsel;
-  if (s_lsel >= s_loben + LZEILEN) s_loben = s_lsel - LZEILEN + 1;
+  if (s_lsel >= s_loben + l_zeilen()) s_loben = s_lsel - l_zeilen() + 1;
   lauf_starten();
   layer_mark_dirty(s_layer);
 }
@@ -2521,6 +2611,10 @@ static void liste_waehlen(void) {
     aktion_senden(A_WAHL, s_lsel);
     return;
   }
+  if (s_lart == L_ZAHL) {                              // OHNE TASTE, eigene Angabe: Eintrag k = k Minuten
+    if (s_lsel > 0) { einst_setzen(S_OHNE, s_lsel); rubrik_zeigen(L_AKTU, S_OHNE); }
+    return;
+  }
   const int a = s_lakt[s_lsel];
   const int seite = s_rubrik == 1 ? (s_sofort ? HIER : s_rseite) : (s_hier ? HIER : s_seite);
   char buf[LTXT];
@@ -2530,13 +2624,14 @@ static void liste_waehlen(void) {
     case A_FAHRT_ZEIGEN: fahrt_oeffnen(); break;
     case A_FAHRTEN: aktion_senden(A_FAHRTEN, seite); break;   // Liste rechnet das Handy (0.13.0)
     case A_HIER_START: hier_starten(); break;
-    case A_EINST: einstellungen_zeigen(E_ANZEIGE); break;
-    case A_ANZ: anzeigemenue_zeigen(A_ANSICHT); break;
-    case A_EABF: eabf_zeigen(); break;
-    case A_ESTR: estrecke_zeigen(ES_UMSTIEGE); break;
+    case 0: break;                                     // Erklärzeile, „Keine gespeichert“: nichts zu wählen
+    case A_EINST: einstellungen_zeigen(L_ANZEIGE); break;
+    case A_RUB: rubrik_zeigen(s_lwert[s_lsel], -1); break;
+    case A_EINST_S: einst_waehlen(s_lwert[s_lsel]); break;
+    case A_WERT: wert_waehlen(s_lwert[s_lsel]); break;
     case A_FRUEHER: detail_oeffnen(VORSCHLAG); break;
     case A_ZU_ABF: case A_ZU_STR:                      // aus der Fahrt zu den Seiten, die Fahrt läuft weiter
-      s_rubrik = a == A_ZU_STR ? 1 : 0; s_hier = s_sofort = false;
+      s_rubrik = a == A_ZU_STR ? 1 : 0; s_hier = s_sofort = s_start = false;
       persist_write_int(PK_RUBRIK, s_rubrik);
       anzeige_zeigen();
       if (seite_da()) anfordern();
@@ -2554,32 +2649,11 @@ static void liste_waehlen(void) {
     case A_F_BEENDEN: frage_zeigen(T("FAHRT", "Fahrt"), T("FAHRT BEENDEN", "Fahrt beenden"), A_FAHRT_ENDE, 0); break;
     case A_F_ALLE_ABF: alle_text(buf, sizeof(buf), s_anzahl); frage_zeigen(T("ABFAHRTEN", "Abfahrten"), buf, A_ALLE_LOESCHEN, 0); break;
     case A_F_ALLE_STR: alle_text(buf, sizeof(buf), s_ranzahl); frage_zeigen(T("STRECKEN", "Strecken"), buf, A_ALLE_LOESCHEN, 1); break;
-    case A_UMST_W: werte_zeigen(L_UMST, T("UMSTIEGE MAX", "Umstiege höchstens"), UMST_W, 5, s_umstiege); break;
-    case A_FUSS_W: werte_zeigen(L_FUSS, T("FUSSWEG MAX", "Fußweg höchstens"), FUSS_W, 4, s_fussweg); break;
-    case A_UZEIT_W: werte_zeigen(L_UZEIT, T("UMSTIEGSZEIT", "Umstiegszeit"), UZEIT_W, 3, s_umstzeit); break;
-    case A_SET_V: wert_waehlen(s_lart, s_lwert[s_lsel]); break;
     case A_FAVORITEN: s_aus_einst = true; aktion_senden(A_FAVORITEN, 0); break;
     case A_SOFORT: aktion_senden(A_SOFORT, 0); break;
     case A_R_NEU: aktion_senden(A_R_NEU, -1); break;
     case A_R_AENDERN: aktion_senden(A_R_NEU, s_rseite); break;
     case A_R_RUECK: case A_R_LOESCHEN: case A_R_ANKUNFT: aktion_senden(a, s_rseite); break;
-    case A_ABF_UM: abfahrt_umschalten(); break;
-    case A_DAUER_UM: dauer_umschalten(); break;
-    case A_ANSICHT: ansicht_zeigen(); break;
-    case A_SET_PWEISS: layout_waehlen(4); break;
-    case A_SET_PAPIER: layout_waehlen(5); break;
-    case A_SET_SIGNAL: layout_waehlen(6); break;
-    case A_INVERS_UM: farbe_umschalten(LW_INVERS, A_INVERS_UM); break;
-    case A_KONTRAST_UM: farbe_umschalten(LW_KONTRAST, A_KONTRAST_UM); break;
-    case A_SCHLIESSEN_UM: farbe_umschalten(LW_SCHLIESSEN, A_SCHLIESSEN_UM); break;
-    case A_UMK: umkreis_zeigen(); break;
-    case A_SET_U500: umkreis_waehlen(500); break;
-    case A_SET_U1000: umkreis_waehlen(1000); break;
-    case A_SET_U2000: umkreis_waehlen(2000); break;
-    case A_QLL: quelle_zeigen(); break;
-    case A_SET_QAUTO: quelle_waehlen(QUELLE_AUTO); break;
-    case A_SET_QRMV: quelle_waehlen(QUELLE_RMV); break;
-    case A_SET_QTRANS: quelle_waehlen(QUELLE_TRANS); break;
     default: aktion_senden(a, s_seite);                // Abfahrten: neu, ändern, Rückfahrt
   }
 }
@@ -2615,6 +2689,45 @@ static void d_zum_akt(void) {                          // markierten Schritt als
   if (s_doben > s_bn - d_sichtbar()) s_doben = s_bn - d_sichtbar();
   if (s_doben < 0) s_doben = 0;
 }
+// Balken im Verlauf der Fahrt (0.15.0): steht er auf einem Zwischenhalt, dessen Abfahrt vorbei ist, rückt er zum nächsten
+// Halt desselben Abschnitts weiter („+ 3 weitere“ ohne Zeit wird übersprungen). Zeile des Ausstiegs: bleibt stehen.
+static bool d_akt_nachziehen(int32_t now) {
+  if (!s_fahrt || s_dakt < 0 || s_dakt >= s_dn) return false;
+  int a = s_dakt;
+  while (Z_ART(s_dz[a].art) == Z_ZWISCHEN && s_dz[a].t && s_dz[a].t <= now) {
+    int j = a + 1;
+    while (j < s_dn && Z_ART(s_dz[j].art) == Z_ZWISCHEN && !s_dz[j].t) j++;
+    if (j >= s_dn) break;
+    const int aj = Z_ART(s_dz[j].art);
+    if (aj != Z_ZWISCHEN && aj != Z_HALT && aj != Z_ZIEL) break;
+    a = j;
+  }
+  if (a == s_dakt) return false;
+  s_dakt = a;
+  return true;
+}
+// Zeitgeber genau auf die nächste Halt-Zeit (Karte oder Balken), statt auf die nächste Antwort vom Handy zu warten
+static AppTimer *s_halt_timer;
+static bool s_halt_gefragt;        // Namen der Halte aufgebraucht, das Handy ist schon gefragt
+static void halt_cb(void *data);
+static void halt_planen(void) {
+  if (s_halt_timer) { app_timer_cancel(s_halt_timer); s_halt_timer = NULL; }
+  if (!s_fahrt) return;
+  const int32_t now = jetzt();
+  int32_t t = 0;
+  for (int p = 0; p < 3 && !t; p++) if (s_k->ht[p] > now) t = s_k->ht[p];
+  if (s_dakt >= 0 && s_dakt < s_dn && Z_ART(s_dz[s_dakt].art) == Z_ZWISCHEN && s_dz[s_dakt].t > now && (!t || s_dz[s_dakt].t < t))
+    t = s_dz[s_dakt].t;
+  if (t && t - now < 3600) s_halt_timer = app_timer_register((t - now) * 1000 + 300, halt_cb, NULL);
+}
+static void halt_cb(void *data) {
+  s_halt_timer = NULL;
+  if (!s_fahrt) return;
+  if (d_akt_nachziehen(jetzt()) && !s_karte && jetzt() - s_taste > 20) d_zum_akt();   // mitrollen, wie beim Handy (0.13.0)
+  if (!s_halt_gefragt && karte_vorbei() == 3 && s_k->halte - 1 > 3 && s_modus == M_DETAIL) { s_halt_gefragt = true; anfordern_mit(true); }
+  layer_mark_dirty(s_layer);
+  halt_planen();
+}
 static void karte_empfangen(DictionaryIterator *it, int phase) {
   Tuple *t;
   s_k->phase = phase;
@@ -2637,6 +2750,13 @@ static void karte_empfangen(DictionaryIterator *it, int phase) {
     text_kopieren(s_k->s[i], sizeof(s_k->s[i]), dict_find(it, MESSAGE_KEY_K_S + i));
     s_k->f[i] = (t = dict_find(it, MESSAGE_KEY_K_F + i)) ? (uint8_t)t->value->int32 : 0;
   }
+  for (int i = 0; i < 3; i++) {                        // nächste Halte im Fahrzeug (0.15.0)
+    s_k->ht[i] = (t = dict_find(it, MESSAGE_KEY_K_HT + i)) ? t->value->int32 : 0;
+    s_k->hn[i][0] = '\0';
+    text_kopieren(s_k->hn[i], sizeof(s_k->hn[i]), dict_find(it, MESSAGE_KEY_K_HN + i));
+  }
+  s_halt_gefragt = false;
+  halt_planen();
 }
 static void detail_empfangen(DictionaryIterator *it, int ab) {
   Tuple *ru = dict_find(it, MESSAGE_KEY_RUBRIK), *se = dict_find(it, MESSAGE_KEY_SEITE), *t;
@@ -2650,7 +2770,7 @@ static void detail_empfangen(DictionaryIterator *it, int ab) {
     if ((t = dict_find(it, MESSAGE_KEY_D_NR))) s_dnr = begrenzen(t->value->int32, 0, LISTE);
     if ((t = dict_find(it, MESSAGE_KEY_D_AKT))) {
       // Balken rückt weiter (nächster Halt): mitrollen, wenn seit 20 s keine Taste gedrückt wurde (0.13.0)
-      if (s_fahrt && t->value->int32 != s_dakt && time(NULL) - s_taste > 20) s_dfolgen = true;
+      if (s_fahrt && t->value->int32 != s_dakt && jetzt() - s_taste > 20) s_dfolgen = true;
       s_dakt = t->value->int32;
     }
     s_dstand = (t = dict_find(it, MESSAGE_KEY_D_STAND)) ? t->value->int32 : 0;
@@ -2666,6 +2786,10 @@ static void detail_empfangen(DictionaryIterator *it, int ab) {
     text_kopieren(z->re, sizeof(z->re), dict_find(it, MESSAGE_KEY_D_RE + j));
   }
   bild_bauen();
+  if (s_fahrt && ab + DBLOCK >= s_dn) {                // Antwort eben erst gerechnet: Balken gleich auf den Stand der Uhr
+    if (d_akt_nachziehen(jetzt()) && jetzt() - s_taste > 20) s_dfolgen = true;
+    halt_planen();
+  }
   if ((s_dfrisch || s_dfolgen) && ab + DBLOCK >= s_dn) { s_dfrisch = s_dfolgen = false; if (s_fahrt) d_zum_akt(); else d_zum_jetzt(); }
   else if (s_doben > s_bn - d_sichtbar()) s_doben = s_bn - d_sichtbar() > 0 ? s_bn - d_sichtbar() : 0;
 }
@@ -2695,7 +2819,7 @@ static void routen_einrichtung(DictionaryIterator *it, int n) {   // Strecken: A
   if (u && f && z) strecken_setzen(u->value->int32, f->value->int32, z->value->int32);
   if (s_modus != M_ANZEIGE && s_modus != M_DETAIL && !s_aus_einst) {   // Ablauf fertig (gespeichert, gelöscht): Strecken zeigen
     // (nicht in Einstellungen > Favoriten: dort schickt das Handy nach dem Umbenennen nur die Namen nach)
-    s_rubrik = 1; s_sofort = false;
+    s_rubrik = 1; s_sofort = s_start = false;
     persist_write_int(PK_RUBRIK, s_rubrik);
     anzeige_zeigen();
     if (s_ranzahl > 0 && s_rt[s_rseite].stand == 0) warten_starten();
@@ -2732,10 +2856,15 @@ static void route_empfangen(DictionaryIterator *it, int i) {     // Verbindungen
 
 // Sprung vom Handy: Startseite nach Standort oder laufende Fahrt (mit DETAIL). Nur, solange nichts gedrückt wurde.
 static void sprung(DictionaryIterator *it, int seite) {
-  if (s_beruehrt || s_hier || s_sofort || s_modus != M_ANZEIGE) return;
   Tuple *ru = dict_find(it, MESSAGE_KEY_RUBRIK), *de = dict_find(it, MESSAGE_KEY_DETAIL);
   const int rub = ru ? (int)ru->value->int32 : 0, n = rub == 1 ? s_ranzahl : s_anzahl;
-  if (rub == RUBRIK_FAHRT) { if (s_fahrt_ende > time(NULL)) fahrt_oeffnen(); return; }
+  if (s_start && rub != RUBRIK_FAHRT && rub != RUBRIK_START) {   // Startseite: nur die Seite für Hoch bzw. Runter (E1)
+    if (n > 0) { if (rub == 1) s_rseite = begrenzen(seite, 0, n - 1); else s_seite = begrenzen(seite, 0, n - 1); }
+    return;
+  }
+  if (s_beruehrt || (s_hier && !s_start) || s_sofort || s_modus != M_ANZEIGE) return;
+  if (rub == RUBRIK_FAHRT) { if (s_fahrt_ende > jetzt()) fahrt_oeffnen(); return; }
+  if (rub == RUBRIK_START) { if (!s_start) start_zeigen(false); return; }   // das Handy lädt die Startseite schon
   if (n <= 0) return;
   s_rubrik = rub;
   persist_write_int(PK_RUBRIK, s_rubrik);
@@ -2748,7 +2877,7 @@ static void sprung(DictionaryIterator *it, int seite) {
 static void empfangen(DictionaryIterator *it, void *ctx) {
   Tuple *t;
   ruhe_neu();                                          // was Neues auf dem Schirm: wieder 10 s zum Lesen
-  if ((t = dict_find(it, MESSAGE_KEY_KONFIG))) { s_konfig = t->value->int32 ? time(NULL) : 0; return; }
+  if ((t = dict_find(it, MESSAGE_KEY_KONFIG))) { s_konfig = t->value->int32 ? jetzt() : 0; return; }
   if ((t = dict_find(it, MESSAGE_KEY_H_FAV))) s_hfav = t->value->int32;   // welche Orte schon Favorit sind (0.8.0)
   if ((t = dict_find(it, MESSAGE_KEY_R_FAV))) s_rfav = t->value->int32;
   if ((t = dict_find(it, MESSAGE_KEY_S_FAV))) s_sfav = t->value->int32;
@@ -2785,12 +2914,20 @@ static void empfangen(DictionaryIterator *it, void *ctx) {
     if ((t = dict_find(it, MESSAGE_KEY_DAUER))) dauer_setzen(t->value->int32);
     if (s_anzahl == 0 && s_timeout && s_rubrik == 0) { app_timer_cancel(s_timeout); s_timeout = NULL; }
     if (s_modus != M_ANZEIGE && s_modus != M_DETAIL && !s_aus_einst) {   // Menü-Ablauf fertig (gespeichert, gelöscht): Abfahrten zeigen
-      s_rubrik = 0; s_hier = false;
+      s_rubrik = 0; s_hier = s_start = false;
       persist_write_int(PK_RUBRIK, s_rubrik);
       anzeige_zeigen();
       if (s_anzahl > 0 && s_str[s_seite].stand == 0) warten_starten();
     }
     if (s_anzahl > 0 && s_str[s_seite].stand == 0) s_str[s_seite].status = ST_LADE;
+    if ((t = dict_find(it, MESSAGE_KEY_AKTU))) {         // Startseite und Aktualisieren (0.15.0), das Handy führt sie
+      const bool vorher = s_startseite;
+      aktu_setzen(t->value->int32);
+      if (s_startseite != vorher && !s_beruehrt && s_modus == M_ANZEIGE) {   // beim Öffnen: wie am Handy eingestellt
+        if (!s_startseite && s_start) start_abbrechen();
+        else if (s_startseite && !s_start && !s_hier && !s_sofort) start_zeigen(false);
+      }
+    }
     lauf_starten();
   } else if ((t = dict_find(it, MESSAGE_KEY_SEITE))) {   // Abfahrten einer Haltestellen-Seite oder Verbindungen einer Strecke
     Tuple *ru = dict_find(it, MESSAGE_KEY_RUBRIK);
@@ -2803,6 +2940,7 @@ static void empfangen(DictionaryIterator *it, void *ctx) {
       Tuple *x;
       if ((x = dict_find(it, MESSAGE_KEY_HIER_NR))) s_hier_nr = x->value->int32;
       if ((x = dict_find(it, MESSAGE_KEY_HIER_N))) s_hier_n = x->value->int32;
+      s_hier_m = (x = dict_find(it, MESSAGE_KEY_HIER_M)) ? x->value->int32 : 0;
       lauf_starten();
     }
     for (int j = 0; j < MAXD; j++) {
@@ -2820,12 +2958,15 @@ static void empfangen(DictionaryIterator *it, void *ctx) {
     vorschlag_empfangen(it, 0, i);
     if ((t = dict_find(it, MESSAGE_KEY_STATUS))) s->status = (int)t->value->int32;
     if (s_rubrik == 0 && s == aktuelle() && s_timeout) { app_timer_cancel(s_timeout); s_timeout = NULL; }
+    // Startseite beim Öffnen ohne Standort: wie bisher die letzte Rubrik (0.15.0); später bleibt „kein Standort“ stehen
+    if (i == HIER && s_start && s->status == ST_STANDORT && !s_beruehrt && s_modus == M_ANZEIGE) start_abbrechen();
   }
   layer_mark_dirty(s_layer);
 }
 
 // ---------- Bedienung ----------
 static void blaettern(int d) {                         // Hoch/Runter auf der Seite
+  if (s_start) { start_verlassen(d < 0 ? 0 : 1); return; }   // Startseite: Hoch = Abfahrten, Runter = Strecken
   if (s_rubrik == 1) {
     if (s_sofort) {                                    // Von hier nach: nächstes Ziel der Liste
       s_sofort_nr += d;
@@ -2878,7 +3019,7 @@ static void schritt(int d) {                           // Hoch/Runter außerhalb
 static void lang_cb(void *data) {
   s_lang_timer = NULL;
   s_lang_fertig = true;
-  if (s_modus == M_ANZEIGE) { rubrik_wechseln(); return; }
+  if (s_modus == M_ANZEIGE) { if (s_start) start_verlassen(s_lang_d < 0 ? 0 : 1); else rubrik_wechseln(); return; }
   schritt(s_lang_d);
   s_lang_timer = app_timer_register(120, lang_cb, NULL);
 }
@@ -2901,8 +3042,10 @@ static void zurueck(void) {
   taste();
   switch (s_modus) {
     case M_ANZEIGE:
-      if (s_rubrik == 0 && s_hier) hier_beenden();     // aus „Nächste Haltestelle“ zurück zu den Seiten
+      if (s_start) { exit_reason_set(APP_EXIT_ACTION_PERFORMED_SUCCESSFULLY); window_stack_pop(true); }   // Startseite: raus
+      else if (s_rubrik == 0 && s_hier) { if (s_hier_start && s_startseite) start_zeigen(true); else hier_beenden(); }
       else if (s_rubrik == 1 && s_sofort) sofort_beenden();
+      else if (s_startseite) start_zeigen(true);     // 0.15.0: von einer Seite eine Ebene hoch zur Startseite
       else { exit_reason_set(APP_EXIT_ACTION_PERFORMED_SUCCESSFULLY); window_stack_pop(true); }   // direkt zum Watchface
       break;
     case M_DETAIL:
@@ -2917,15 +3060,9 @@ static void zurueck(void) {
     case M_LISTE:
       switch (s_lart) {
         case L_EINST: menue_wieder(); break;
-        case L_ANZEIGE: einstellungen_zeigen(E_ANZEIGE); break;
-        case L_ANSICHT: anzeigemenue_zeigen(A_ANSICHT); break;
-        case L_QUELLE: einstellungen_zeigen(E_QUELLE); break;
-        case L_UMKREIS: einstellungen_zeigen(E_UMKREIS); break;
-        case L_EABF: einstellungen_zeigen(E_ABF); break;
-        case L_ESTRECKE: einstellungen_zeigen(E_STRECKEN); break;
-        case L_UMST: estrecke_zeigen(ES_UMSTIEGE); break;
-        case L_FUSS: estrecke_zeigen(ES_FUSSWEG); break;
-        case L_UZEIT: estrecke_zeigen(ES_UMSTZEIT); break;
+        case L_ANZEIGE: case L_AKTU: case L_EABF: case L_ESTR: case L_SUCHE: case L_DATEN: einstellungen_zeigen(s_lart); break;
+        case L_WERTE: rubrik_zeigen(EINST[s_lset].rub, s_lset); break;
+        case L_ZAHL: werte_zeigen(S_OHNE); break;
         case L_MENUE: menue_verlassen(); break;
         case L_DMENUE: details_wieder(); break;
         default: aktion_senden(A_ZURUECK, 0);
@@ -2933,7 +3070,7 @@ static void zurueck(void) {
       break;
     case M_LADE:
       if (!s_lade_abgelaufen) aktion_senden(A_ZURUECK, 0);   // Handy bricht ab und zeigt die vorige Liste
-      else if (s_aus_einst) einstellungen_zeigen(E_FAVORITEN);
+      else if (s_aus_einst) einstellungen_zeigen(L_HANDY);
       else menue_wieder();                             // Handy antwortet nicht: lokal zurück
       break;
   }
@@ -2968,7 +3105,7 @@ static int16_t s_tx0, s_ty0, s_tx, s_ty;
 static bool s_tan;
 static int block_bei(int y) {                          // Nummer der Abfahrt bzw. Verbindung unter dem Finger, -1 = keine
   int y0, dy;
-  if (SIGNAL) { y0 = SIG_Y0; dy = SIG_DY; }
+  if (s_start) { y0 = ST_Y0 - 4; dy = ST_DY; }
   else if (s_rubrik == 1) { y0 = s_layout == LAYOUT_PAPIER ? 92 : 101; dy = s_layout == LAYOUT_PAPIER ? 39 : 38; }
   else {
     const bool ziel = hat_ziel(aktuelle());
@@ -2987,11 +3124,11 @@ static void antippen(int x, int y) {
     int idx[MAXD], n, k = block_bei(y);
     const char *vt = s_rubrik == 1 ? vt_rt(aktuelle_route()) : vt_str(aktuelle());
     if (vt[0] && k == MAXD - 1) { detail_oeffnen(VORSCHLAG); return; }   // dritte Zeile: Vorschlag FRUEHER DA
-    n = s_rubrik == 1 ? route_naechste(aktuelle_route(), time(NULL), idx) : naechste(aktuelle(), time(NULL), idx);
-    detail_oeffnen(k >= 0 && k < n ? idx[k] : 0);
+    n = s_rubrik == 1 ? route_naechste(aktuelle_route(), jetzt(), idx) : naechste(aktuelle(), jetzt(), idx);
+    detail_oeffnen(k >= 0 && k < n ? k : 0);   // Platz in der gezeigten Liste, wie das Handy zählt (0.15.0)
   } else if (s_modus == M_LISTE) {
-    const int k = (y - (KLAR_ART ? K_Y0 : P_Y0) - liste_versatz()) / K_ZEILE;
-    if (k >= 0 && k < LZEILEN && s_loben + k < s_lanz) { s_lsel = s_loben + k; liste_waehlen(); }
+    const int k = (y - (KLAR_ART ? K_Y0 : P_Y0) - liste_versatz()) / l_hoehe();
+    if (k >= 0 && k < l_zeilen() && s_loben + k < s_lanz) { s_lsel = s_loben + k; liste_waehlen(); }
   } else if (s_modus == M_SUCHE) rad_waehlen();
 }
 static void beruehrt(const TouchEvent *e, void *ctx) {
@@ -3008,15 +3145,18 @@ static void beruehrt(const TouchEvent *e, void *ctx) {
   } else if (BETRAG(dx) < 20 && BETRAG(dy) < 20) antippen(s_tx0, s_ty0);
 }
 
-// Jede Minute neu zeichnen; Seite und Details auch neu laden, bis AKTIV_S nach dem letzten Tastendruck
+// Jede Minute neu zeichnen. Neu laden (0.15.0, AKTUALISIEREN): Seite und Details alle s_regel Minuten (0 = nur beim
+// Öffnen), solange OHNE TASTE es erlaubt (Standard bis 5 min nach der letzten Taste); die aktive Fahrt jede Minute.
+// Bis 0.14.0 fest jede Minute bis 5 min nach der letzten Taste (AKTIV_S). NACH ABFAHRT stellt ab_planen().
 static void tick(struct tm *t, TimeUnits u) {
   layer_mark_dirty(s_layer);
-  if (s_fahrt_ende && time(NULL) > s_fahrt_ende) {     // Fahrt vorbei (Ankunft): zurück zur Seite
+  if (s_fahrt_ende && jetzt() > s_fahrt_ende) {        // Fahrt vorbei (Ankunft): zurück zur Seite
     s_fahrt_ende = 0;
     if (s_fahrt && s_modus == M_DETAIL) { fahrt_schliessen(); return; }
   }
   if (s_fahrt && s_modus == M_DETAIL) anfordern_mit(true);   // Fahrt bleibt offen: jede Minute neu (Phase, Echtzeit)
-  else if ((s_modus == M_ANZEIGE || s_modus == M_DETAIL) && seite_da() && time(NULL) - s_taste < AKTIV_S) anfordern_mit(true);
+  else if ((s_modus == M_ANZEIGE || s_modus == M_DETAIL) && seite_da() && s_regel && laden_erlaubt() &&
+           jetzt() - s_lade_t >= s_regel * 60 - 30) anfordern_mit(true);
 }
 
 // ---------- Lebenszyklus ----------
@@ -3052,9 +3192,10 @@ static void init(void) {
   // Einrichtung mit 8 Seiten und Namen in zwei Schreibweisen braucht mehr als 1 KB; Ausgang mit Suchtext 256
   const uint32_t ein = app_message_inbox_size_maximum();
   app_message_open(ein < 2048 ? ein : 2048, 256);
-  if (persist_exists(PK_LAYOUT)) {
-    layout_setzen(persist_read_int(PK_LAYOUT));
-  } else farben_setzen();
+  const int lw = persist_exists(PK_LAYOUT) ? persist_read_int(PK_LAYOUT) : -1;
+  if (lw >= 0) layout_setzen(lw); else farben_setzen();
+  if (persist_exists(PK_AKTU)) aktu_setzen(persist_read_int(PK_AKTU));
+  else if (lw >= 0 && (lw & LW_SCHLIESSEN)) s_ohne = -1;   // APP SCHLIESSEN bis 0.14.0 -> OHNE TASTE: nach 10 s schließen
   if (persist_exists(PK_UMKREIS)) umkreis_setzen(persist_read_int(PK_UMKREIS));
   if (persist_exists(PK_QUELLE)) quelle_setzen(persist_read_int(PK_QUELLE));
   if (persist_exists(PK_ABFAHRT)) abfahrt_setzen(persist_read_int(PK_ABFAHRT));
@@ -3062,7 +3203,12 @@ static void init(void) {
   if (persist_exists(PK_RUBRIK)) s_rubrik = persist_read_int(PK_RUBRIK) == 1 ? 1 : 0;
   if (persist_exists(PK_UMSTIEGE))
     strecken_setzen(persist_read_int(PK_UMSTIEGE), persist_read_int(PK_FUSSWEG), persist_read_int(PK_UMSTZEIT));
-  s_taste = time(NULL);
+  s_taste = jetzt();
+  if (s_startseite) {                                  // Startseite gleich zeigen; ohne Standort schaltet das Handy zurück
+    s_start = s_hier = true; s_rubrik = 0;
+    strcpy(s_str[HIER].name[0], "STANDORT");
+    strcpy(s_str[HIER].klar[0], "Standort ...");
+  }
 
   s_window = window_create();
   window_set_background_color(s_window, GColorBlack);
@@ -3084,6 +3230,8 @@ static void deinit(void) {
   if (s_lang_timer) app_timer_cancel(s_lang_timer);
   if (s_rubrik_timer) app_timer_cancel(s_rubrik_timer);
   if (s_ruhe) app_timer_cancel(s_ruhe);
+  if (s_ab_timer) app_timer_cancel(s_ab_timer);
+  if (s_halt_timer) app_timer_cancel(s_halt_timer);
   if (s_diktat) dictation_session_destroy(s_diktat);
   tick_timer_service_unsubscribe();
   window_destroy(s_window);

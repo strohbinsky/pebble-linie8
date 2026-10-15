@@ -50,7 +50,11 @@ function Strecken(hilfe) {
         nachLat: +z.lat, nachLon: +z.lon,                                                    // für die DB (0.9.0); RMV ohne Zugnummer
         mittel: verkehrsmittel((pr && pr.catOut) || ''), vonSteigPlan: hilfe.steigText(o.track),
         halte: stops.length > 1 ? stops.length - 1 : 0,
-        zwischen: stops.slice(1, -1).map(function (s) { return { name: s.name, t: rmvZeit({ date: s.arrDate || s.depDate, time: s.arrTime || s.depTime, rtTime: s.rtArrTime || s.rtDepTime, rtDate: s.rtArrDate || s.rtDepDate }, true) }; })
+        // Zwischenhalte: vorbei ab ihrer Abfahrt (0.15.0; bis 0.14.0 die Ankunft), Echtzeit vor Plan
+        zwischen: stops.slice(1, -1).map(function (s) {
+          var rt = s.rtDepTime ? { t: s.rtDepTime, d: s.rtDepDate || s.depDate } : s.rtArrTime ? { t: s.rtArrTime, d: s.rtArrDate || s.arrDate } : null;
+          return { name: s.name, t: rmvZeit({ date: s.depDate || s.arrDate, time: s.depTime || s.arrTime, rtTime: rt && rt.t, rtDate: rt && rt.d }, true) };
+        })
       });
     });
     return verbindung(legs);
@@ -79,7 +83,7 @@ function Strecken(hilfe) {
         nachLat: l.to && l.to.lat, nachLon: l.to && l.to.lon, zn: l.tripShortName || '',        // für die DB (0.9.0)
         mittel: verkehrsmittel(l.mode || ''), vonSteigPlan: hilfe.steigText(l.from && l.from.scheduledTrack),
         halte: inter.length + 1,
-        zwischen: inter.map(function (s) { return { name: s.name, t: sek(s.arrival || s.departure) }; })
+        zwischen: inter.map(function (s) { return { name: s.name, t: sek(s.departure || s.arrival) }; })   // vorbei ab Abfahrt (0.15.0)
       });
     });
     return ok ? verbindung(legs) : null;

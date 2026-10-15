@@ -16,6 +16,11 @@
   ul.menue .pfeil { float: right; color: #FFAA00; font-size: 22px; line-height: 18px; }
   select { width: 100%; box-sizing: border-box; padding: 11px; font-size: 16px; border: 1px solid #444; border-radius: 8px; background: #222; color: #fff; }
   input[type=text] { width: 100%; box-sizing: border-box; padding: 12px; font-size: 17px; border: 1px solid #444; border-radius: 8px; background: #222; color: #fff; }
+  input[type=number] { width: 70px; padding: 6px; font-size: 17px; border: 1px solid #444; border-radius: 8px; background: #222; color: #fff; margin: 0 4px; }
+  textarea { width: 100%; box-sizing: border-box; height: 140px; font: 11px/1.3 monospace; background: #222; color: #ccc; border: 1px solid #444; border-radius: 8px; }
+  table.prot { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0 12px; }
+  table.prot td, table.prot th { padding: 4px 3px; border-bottom: 1px solid #2a2a2a; text-align: left; vertical-align: top; }
+  table.prot th { color: #999; font-weight: normal; }
   button { padding: 11px 15px; font-size: 15px; border: 0; border-radius: 8px; background: #333; color: #fff; margin: 8px 6px 0 0; }
   button.haupt { background: #FFAA00; color: #000; font-weight: bold; }
   button.klein { padding: 7px 10px; font-size: 13px; color: #ddd; }
@@ -56,10 +61,16 @@ var e = null;                      // Entwurf der Seite im Editor
 var rmvKey = (ZUSTAND && ZUSTAND.rmvKey) || '';
 var rmvTest = '';
 var dbId = (ZUSTAND && ZUSTAND.dbId) || '', dbKey = (ZUSTAND && ZUSTAND.dbKey) || '', dbTest = '';   // DB Timetables (0.9.0)
-function layoutWahl(v) { return v === 'phosphor' || v === 'phosphor_weiss' ? 'phosphor_weiss' : v === 'signal' ? 'signal' : 'papier'; }   // Papier, Phosphor, Signal (0.14.0)
+function layoutWahl(v) { return v === 'phosphor' || v === 'phosphor_weiss' ? 'phosphor_weiss' : 'papier'; }   // Papier, Phosphor (Signal bis 0.14.0)
 var layout = layoutWahl(ZUSTAND && ZUSTAND.layout);   // Ansicht auf der Uhr
 var inversWert = !!(ZUSTAND && ZUSTAND.invers), kontrastWert = !!(ZUSTAND && ZUSTAND.kontrast);   // Farben (0.9.1)
-var schliessenWert = !!(ZUSTAND && ZUSTAND.schliessen);   // App nach 10 s ohne Taste zu (0.9.2, Standard aus)
+// Startseite und Aktualisieren (0.15.0); ohneWert: -1 nach 10 s schließen, 0 immer weiter laden, 1–60 Minuten
+var startseiteWert = !!(ZUSTAND && ZUSTAND.startseite);
+var regelWert = [1, 2, 5, 0].indexOf(ZUSTAND && ZUSTAND.regel) >= 0 ? ZUSTAND.regel : 1;
+var nachAbfahrtWert = !(ZUSTAND && ZUSTAND.nachAbfahrt === false);
+var ohneWert = (ZUSTAND && typeof ZUSTAND.ohneTaste === 'number' && ZUSTAND.ohneTaste >= -1 && ZUSTAND.ohneTaste <= 60) ? ZUSTAND.ohneTaste : 5;
+var eigenMin = ohneWert > 0 && ohneWert !== 5 ? ohneWert : 10;   // Zahlenfeld „nach … min“
+var fahrtlog = (ZUSTAND && ZUSTAND.fahrtlog) || [], fahrtlogLoeschen = false;
 var umkreisWert = L.UMKREISE.indexOf(ZUSTAND && ZUSTAND.umkreis) >= 0 ? ZUSTAND.umkreis : 1000;   // Umkreis um den Start
 var abfahrtWert = (ZUSTAND && ZUSTAND.abfahrt) === 'aktuell' ? 'aktuell' : 'plan';   // Abfahrtszeit auf der Uhr
 var dauerWert = (ZUSTAND && ZUSTAND.dauer) === 'aus' ? 'aus' : 'an';                // Fahrtdauer auf der Uhr
@@ -105,12 +116,19 @@ function holen(pfad, fertig) {
 // Änderungen werden vorgemerkt, die Leiste oben zeigt „Speichern“. Android-Zurück geht eine Ebene hoch und speichert
 // ganz oben; geht die Seite in den Hintergrund, wird ebenfalls gespeichert (beides nur, wenn die Pebble-App es weitergibt).
 var unterseite = (ZUSTAND && ZUSTAND.unterseite) || '';
+// Seit 0.15.0 die Einstellungen in denselben Rubriken und derselben Reihenfolge wie an der Uhr (Anzeige, Aktualisieren,
+// Suche, Daten); die Listen Abfahrten, Strecken, Favoriten bleiben oben. Bis 0.14.0: Anzeige auf der Uhr,
+// Verbindungssuche, Datenquelle und Umkreis. Das Fahrtprotokoll erscheint nur, wenn eines da ist.
 var UNTERSEITEN = [['haltestellen', 'Abfahrten'], ['strecken', 'Strecken'], ['favoriten', 'Favoriten'],
-                   ['anzeige', 'Anzeige auf der Uhr'], ['suche', 'Verbindungssuche'], ['daten', 'Datenquelle und Umkreis']];
+                   ['anzeige', 'Anzeige'], ['aktualisieren', 'Aktualisieren'], ['suche', 'Suche'], ['daten', 'Daten'],
+                   ['protokoll', 'Fahrtprotokoll']];
 function daten() {
-  return { strecken: strecken, rmvKey: rmvKey, dbId: dbId, dbKey: dbKey, layout: layout, invers: inversWert, kontrast: kontrastWert, schliessen: schliessenWert, umkreis: umkreisWert, quelle: quelleWert, abfahrt: abfahrtWert, dauer: dauerWert,
+  return { strecken: strecken, rmvKey: rmvKey, dbId: dbId, dbKey: dbKey, layout: layout, invers: inversWert, kontrast: kontrastWert, umkreis: umkreisWert, quelle: quelleWert, abfahrt: abfahrtWert, dauer: dauerWert,
+           startseite: startseiteWert, regel: regelWert, nachAbfahrt: nachAbfahrtWert, ohneTaste: ohneWert, fahrtlogLoeschen: fahrtlogLoeschen,
            routen: routen, favoriten: favoriten, umstiege: umstiegeWert, fussweg: fusswegWert, umstzeit: umstzeitWert };
 }
+function ohneText(v) { return v < 0 ? 'nach 10 s schließen' : v === 0 ? 'immer weiter laden' : 'nach ' + v + ' min nicht mehr laden'; }
+function regelText(v) { return v === 0 ? 'nur beim Öffnen' : v === 1 ? 'jede Minute' : 'alle ' + v + ' min'; }
 var geaendert = false;
 function vormerken() { geaendert = true; leisteZeigen(); }
 function leisteZeigen() {
@@ -128,25 +146,34 @@ function namenFokus(i) {                 // neuer Favorit: gleich den Namen eint
 function hauptHtml() {
   var kurz = {
     haltestellen: strecken.length + ' von ' + MAXS, strecken: routen.length + ' von ' + MAXR, favoriten: favoriten.length + ' von ' + MAXF,
-    anzeige: { phosphor_weiss: 'Phosphor', papier: 'Papier', signal: 'Signal' }[layout] + (inversWert ? ', invertiert' : '') + (kontrastWert && layout === 'phosphor_weiss' ? ', hoher Kontrast' : '') + (schliessenWert ? ', schließt nach 10 s' : '') + (abfahrtWert === 'aktuell' ? ', Zeit aktuell' : ''),
-    suche: (umstiegeWert === 9 ? 'Umstiege beliebig' : 'höchstens ' + umstiegeWert + ' Umstiege') + ', ' + fusswegWert + ' min Fußweg',
-    daten: { auto: 'Auto', rmv: 'nur RMV', trans: 'nur Transitous' }[quelleWert] + (rmvKey ? ' mit RMV-Schlüssel' : ' ohne RMV-Schlüssel') + (dbId && dbKey ? ', DB für Züge' : '') + ', Umkreis ' + kmText(umkreisWert)
+    anzeige: (startseiteWert ? 'Startseite, ' : '') + { phosphor_weiss: 'Phosphor', papier: 'Papier' }[layout] + (inversWert ? ', invertiert' : '') + (kontrastWert && layout === 'phosphor_weiss' ? ', hoher Kontrast' : '') + (abfahrtWert === 'aktuell' ? ', Zeit aktuell' : ''),
+    aktualisieren: regelText(regelWert) + (nachAbfahrtWert ? ', nach Abfahrt' : '') + ', ohne Taste ' + ohneText(ohneWert),
+    suche: 'Umkreis ' + kmText(umkreisWert) + ', ' + (umstiegeWert === 9 ? 'Umstiege beliebig' : 'höchstens ' + umstiegeWert + ' Umstiege') + ', ' + fusswegWert + ' min Fußweg',
+    daten: { auto: 'Auto', rmv: 'nur RMV', trans: 'nur Transitous' }[quelleWert] + (rmvKey ? ' mit RMV-Schlüssel' : ' ohne RMV-Schlüssel') + (dbId && dbKey ? ', DB für Züge' : ''),
+    protokoll: fahrtlog.length + (fahrtlog.length === 1 ? ' Fahrt' : ' Fahrten') + ' aufgezeichnet'
   };
   return '<h1>Linie 8</h1><div class="klein">Änderungen gehen erst mit <b>Speichern</b> (oben) an die Uhr. ' +
     'Auf der Uhr wechselt Hoch/Runter lang zwischen <b>Abfahrten</b> und <b>Strecken</b>.</div><ul class="menue">' +
-    UNTERSEITEN.map(function (u) {
+    UNTERSEITEN.filter(function (u) { return u[0] !== 'protokoll' || fahrtlog.length; }).map(function (u) {
       return '<li data-a="geh" data-s="' + u[0] + '"><b>' + u[1] + '</b><span class="pfeil">›</span><br><span class="klein">' + esc(kurz[u[0]]) + '</span></li>';
     }).join('') + '</ul><button data-a="speichern">' + (geaendert ? 'Speichern und schließen' : 'Schließen') + '</button>';
 }
 function zeigeListe() {
   ansicht = 'liste';
   var titel = (UNTERSEITEN.filter(function (u) { return u[0] === unterseite; })[0] || [])[1];
-  var inhalt = { haltestellen: haltestellenHtml, strecken: routenHtml, favoriten: favoritenHtml, anzeige: anzeigeHtml, suche: suchHtml, daten: datenHtml }[unterseite];
+  var inhalt = { haltestellen: haltestellenHtml, strecken: routenHtml, favoriten: favoritenHtml, anzeige: anzeigeHtml, aktualisieren: aktualisierenHtml,
+                 suche: suchHtml, daten: datenHtml, protokoll: protokollHtml }[unterseite];
   if (ersetzen) { $('app').innerHTML = ersetzenHtml(); return; }
   $('app').innerHTML = inhalt ? '<button class="klein" data-a="uebersicht">‹ Übersicht</button><h1>' + titel + '</h1>' + inhalt() : hauptHtml();
   if ($('rmvKey')) { $('rmvKey').oninput = function () { rmvKey = this.value.trim(); vormerken(); }; $('rmvKey').onchange = vormerken; }
   if ($('dbId')) { $('dbId').oninput = function () { dbId = this.value.trim(); vormerken(); }; $('dbId').onchange = vormerken; }
   if ($('dbKey')) { $('dbKey').oninput = function () { dbKey = this.value.trim(); vormerken(); }; $('dbKey').onchange = vormerken; }
+  if ($('ohneMin')) $('ohneMin').oninput = function () {   // eigene Angabe: 1–60 min, gilt sofort als gewählt
+    var v = parseInt(this.value, 10);
+    if (isNaN(v)) return;
+    eigenMin = Math.max(1, Math.min(60, v)); ohneWert = eigenMin; vormerken();
+    var r = document.querySelector && document.querySelector('input[name="ohne"][value="eigen"]'); if (r) r.checked = true;
+  };
   listeVerdrahten();
   leisteZeigen();
 }
@@ -195,24 +222,24 @@ function haltestellenHtml() {
   if (strecken.length >= MAXS) h += '<div class="klein">Voll (' + MAXS + '): beim Anlegen wählst du, welche ersetzt wird.</div>';
   return h;
 }
+function schalter(a, titel, satz, an) {   // Einstellung mit zwei Werten: ein Kästchen und ein Satz
+  return '<label class="zeile"><input type="checkbox" data-a="' + a + '"' + (an ? ' checked' : '') + '><b>' + titel + '</b><br><span class="klein">' + satz + '</span></label>';
+}
 function anzeigeHtml() {
-  return '<h3>Ansicht</h3>' +
+  return '<h3>Startseite</h3>' +
+    schalter('startseite', 'Startseite', 'Beim Öffnen die Abfahrten der nächsten Haltestelle. Hoch führt zu Abfahrten, Runter zu Strecken, Zurück auf einer Seite wieder zur Startseite. Ohne Standort öffnet die App wie bisher', startseiteWert) +
+    '<h3>Ansicht</h3>' +
     [['papier', 'Papier', 'Standard. Schwarz auf Weiß, fette Systemschrift, große Ziffern, Namen mit Umlauten — am besten lesbar'],
-     ['phosphor_weiss', 'Phosphor', 'Weiße Pixelschrift auf Schwarz wie das Watchface Phosphor'],
-     ['signal', 'Signal', 'Modern: Weiß auf Schwarz, Linien in Farbe, Minuten groß, nächste Abfahrt als Karte; invertiert Schwarz auf Weiß']].map(function (v) {
+     ['phosphor_weiss', 'Phosphor', 'Weiße Pixelschrift auf Schwarz wie das Watchface Phosphor']].map(function (v) {
       return '<label class="zeile"><input type="radio" name="layout" data-a="layout" value="' + v[0] + '"' + (layout === v[0] ? ' checked' : '') + '>' +
         '<b>' + v[1] + '</b><br><span class="klein">' + v[2] + '</span></label>';
     }).join('') +
     '<h3>Farben</h3>' +
-    [['invers', 'Invertiert', 'Papier wird weiß auf Schwarz, Phosphor und Signal dunkel auf Hell', inversWert],
-     ['kontrast', 'Hoher Kontrast', 'Nur Phosphor (Papier hat nie Grau): keine graue oder blasse Schrift, farbige Hinweise bleiben', kontrastWert],
-     ['schliessen', 'App nach 10 s schließen', 'Ohne Tastendruck zurück zum Watchface (nicht beim Laden und in der aktiven Fahrt). Aus: Linie 8 bleibt offen', schliessenWert]].map(function (v) {
-      return '<label class="zeile"><input type="checkbox" data-a="' + v[0] + '"' + (v[3] ? ' checked' : '') + '>' +
-        '<b>' + v[1] + '</b><br><span class="klein">' + v[2] + '</span></label>';
-    }).join('') +
+    schalter('invers', 'Invertiert', 'Papier wird weiß auf Schwarz, Phosphor schwarz auf Weiß', inversWert) +
+    schalter('kontrast', 'Hoher Kontrast', 'Nur Phosphor (Papier hat nie Grau): keine graue oder blasse Schrift, farbige Hinweise bleiben', kontrastWert) +
     '<h3>Abfahrtszeit</h3>' +
     [['plan', 'Fahrplan', 'Standard. Planzeit, Verspätung klein dahinter (+2\')'],
-     ['aktuell', 'Aktuell', 'Zeit mit Verspätung; in Klar orange, in Phosphor gelb. Restminuten zählen immer mit Verspätung']].map(function (v) {
+     ['aktuell', 'Aktuell', 'Zeit mit Verspätung; in Papier orange, in Phosphor gelb. Restminuten zählen immer mit Verspätung']].map(function (v) {
       return '<label class="zeile"><input type="radio" name="abfahrt" data-a="abfahrtWert" value="' + v[0] + '"' + (abfahrtWert === v[0] ? ' checked' : '') + '>' +
         '<b>' + v[1] + '</b><br><span class="klein">' + v[2] + '</span></label>';
     }).join('') +
@@ -220,6 +247,63 @@ function anzeigeHtml() {
     '<label class="zeile"><input type="checkbox" data-a="dauerWert"' + (dauerWert === 'an' ? ' checked' : '') + '>' +
     '<b>Fahrtdauer bis zum Ausstieg zeigen</b><br><span class="klein">Standard an. Minuten je Abfahrt, gedimmt; entfällt ohnehin, wenn kein Platz ist</span></label>' +
     '<div class="klein">Alles auch an der Uhr: Select lang → Einstellungen → Anzeige.</div>';
+}
+function aktualisierenHtml() {             // 0.15.0: wann die Seite von selbst neu lädt
+  function wahl(name, wert, aktuell, titel, satz) {
+    return '<label class="zeile"><input type="radio" name="' + name + '" data-a="' + name + '" value="' + wert + '"' + (aktuell ? ' checked' : '') + '>' +
+      '<b>' + titel + '</b>' + (satz ? '<br><span class="klein">' + satz + '</span>' : '') + '</label>';
+  }
+  var eigen = ohneWert > 0 && ohneWert !== 5;
+  return '<div class="klein">Gilt für Abfahrten, Strecken und die Startseite gleich. Die aktive Fahrt lädt immer jede Minute.</div>' +
+    '<h3>Regelmäßig</h3>' +
+    wahl('regel', 1, regelWert === 1, 'jede Minute', 'Standard') + wahl('regel', 2, regelWert === 2, 'alle 2 min') +
+    wahl('regel', 5, regelWert === 5, 'alle 5 min') + wahl('regel', 0, regelWert === 0, 'nur beim Öffnen', 'und beim Blättern') +
+    '<h3>Nach Abfahrt</h3>' +
+    schalter('nachAbfahrt', 'Gleich neu laden', 'Sobald die oberste Abfahrt abgefahren ist, lädt die Seite sofort neu, damit wieder drei dastehen. Standard an', nachAbfahrtWert) +
+    '<h3>Ohne Taste</h3><div class="klein">Was passiert, wenn keine Taste gedrückt wird.</div>' +
+    wahl('ohne', -1, ohneWert < 0, 'nach 10 s schließen', 'zurück zum Watchface; nicht beim Laden und in der aktiven Fahrt') +
+    wahl('ohne', 5, ohneWert === 5, 'nach 5 min nicht mehr laden', 'Standard. Die App bleibt offen, die Minuten zählen weiter') +
+    '<label class="zeile"><input type="radio" name="ohne" data-a="ohne" value="eigen"' + (eigen ? ' checked' : '') + '><b>nach</b>' +
+    '<input type="number" id="ohneMin" min="1" max="60" value="' + eigenMin + '"><b>min nicht mehr laden</b></label>' +
+    wahl('ohne', 0, ohneWert === 0, 'immer weiter laden', 'kostet Akku an Uhr und Handy') +
+    '<div class="klein">Auch an der Uhr: Select lang → Einstellungen → Aktualisieren.</div>';
+}
+// Fahrtprotokoll (0.15.0): je Halt die erste Prognose, wann die Uhr umsprang (Prognose, als der Halt noch kam) und der
+// Standort, der dem Halt am nächsten war. Darunter die Rohdaten zum Kopieren.
+function protokollHtml() {
+  if (!fahrtlog.length || fahrtlogLoeschen) return '<div class="klein">Kein Protokoll' + (fahrtlogLoeschen ? ' (wird beim Speichern gelöscht)' : '') + '.</div>';
+  function hm(t) { var d = new Date(t * 1000); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2); }
+  var h = '<div class="klein">Für die Testfahrt: Die Uhr zählt einen Halt ab seiner Abfahrt laut Prognose weiter. „Standort“ ist der ' +
+    'Messpunkt des Handys, der dem Halt am nächsten lag (etwa jede Minute einer, solange die Fahrt offen ist).</div>';
+  fahrtlog.forEach(function (f) {
+    var halte = {}, reihe = [], fixe = 0;
+    f.e.forEach(function (e) {
+      if (e.lat !== undefined) fixe++;
+      (e.h || []).forEach(function (x) {
+        var k = x[0], t = x[1], hh = halte[k];
+        if (!hh) { hh = halte[k] = { erst: t, uhr: t, ort: null }; reihe.push(k); }
+        if (e.t <= t) hh.uhr = t;                       // letzte Prognose, solange der Halt noch kam
+      });
+    });
+    reihe.forEach(function (k) {
+      var o = f.o && f.o[k], hh = halte[k];
+      if (!o) return;
+      f.e.forEach(function (e) {
+        if (e.lat === undefined) return;
+        var m = Math.round(entfernung(e.lat, e.lon, o[0], o[1]));
+        if (!hh.ort || m < hh.ort.m) hh.ort = { t: e.t, m: m };
+      });
+    });
+    h += '<h3>' + esc(f.titel || 'Fahrt') + ' · ' + hm(f.seit) + '</h3><div class="klein">' + f.e.length + ' Einträge, ' + fixe + ' mit Standort</div>' +
+      '<table class="prot"><tr><th>Halt</th><th>erste Prognose</th><th>Uhr sprang</th><th>Standort</th></tr>' +
+      reihe.map(function (k) {
+        var hh = halte[k];
+        return '<tr><td>' + esc(k) + '</td><td>' + hm(hh.erst) + '</td><td>' + hm(hh.uhr) + '</td><td>' +
+          (hh.ort ? hm(hh.ort.t) + ' · ' + hh.ort.m + ' m' : '—') + '</td></tr>';
+      }).join('') + '</table>';
+  });
+  return h + '<h3>Rohdaten</h3><textarea readonly>' + esc(JSON.stringify(fahrtlog)) + '</textarea>' +
+    '<button data-a="protLoeschen">Protokoll löschen</button>';
 }
 function datenHtml() {
   return '<h3>Datenquelle</h3><div class="klein">Optional: eigener RMV-Schlüssel (accessId, kostenlos bei RMV Open Data). ' +
@@ -239,14 +323,7 @@ function datenHtml() {
     '<input type="text" id="dbId" placeholder="DB Client-ID (leer = ohne DB)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" value="' + esc(dbId) + '">' +
     '<input type="text" id="dbKey" placeholder="DB API-Key (Client Secret)" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" value="' + esc(dbKey) + '">' +
     '<button data-a="dbTest">DB-Zugang prüfen</button><div class="klein" id="dbErg">' + esc(dbTest) + '</div>' +
-    '<h3>Umkreis</h3><div class="klein">So weit läufst du höchstens: bei der Rückfahrt mit Ankunft im Umkreis um den Start, ' +
-    'bei „Alle in der Nähe“ als Haltestelle und für den Vorschlag „früher da“ (nur, wenn du so nah am Start einer Abfahrt oder Strecke stehst). ' +
-    'Normal endet die Rückfahrt genau am Start.</div>' +
-    L.UMKREISE.map(function (m) {
-      return '<label class="zeile"><input type="radio" name="umkreis" data-a="umkreisWert" value="' + m + '"' + (umkreisWert === m ? ' checked' : '') + '>' +
-        '<b>' + kmText(m) + '</b>' + (m === 1000 ? ' <span class="klein">Standard</span>' : '') + '</label>';
-    }).join('') +
-    '<div class="klein">Auch an der Uhr: Select lang → Einstellungen → Umkreis.</div>';
+    '<div class="klein">Die Quelle auch an der Uhr: Select lang → Einstellungen → Daten.</div>';
 }
 
 // ---------- Strecken, Favoriten, Verbindungssuche (0.6.1) ----------
@@ -301,19 +378,26 @@ function favoritenHtml() {
   if (favoriten.length >= MAXF) h += '<div class="klein">Voll (' + MAXF + '): beim Anlegen wählst du, welcher ersetzt wird.</div>';
   return h;
 }
-function suchHtml() {                    // Verbindungssuche der Strecken, wie an der Uhr: Einstellungen → Strecken
+function suchHtml() {                    // Umkreis und Verbindungssuche der Strecken, wie an der Uhr: Einstellungen → Suche (0.15.0)
   function gruppe(name, werte, aktuell, text) {
     return werte.map(function (v) {
       return '<label class="zeile"><input type="radio" name="' + name + '" data-a="' + name + '" value="' + v + '"' + (aktuell === v ? ' checked' : '') + '>' + text(v) + '</label>';
     }).join('');
   }
-  return '<div class="klein">Gilt für die Strecken.</div><h3>Umstiege höchstens</h3>' +
+  return '<h3>Umkreis</h3><div class="klein">So weit läufst du höchstens: bei der Rückfahrt mit Ankunft im Umkreis um den Start, ' +
+    'bei „Alle in der Nähe“ als Haltestelle und für den Vorschlag „früher da“ (nur, wenn du so nah am Start einer Abfahrt oder Strecke stehst). ' +
+    'Normal endet die Rückfahrt genau am Start.</div>' +
+    L.UMKREISE.map(function (m) {
+      return '<label class="zeile"><input type="radio" name="umkreis" data-a="umkreisWert" value="' + m + '"' + (umkreisWert === m ? ' checked' : '') + '>' +
+        '<b>' + kmText(m) + '</b>' + (m === 1000 ? ' <span class="klein">Standard</span>' : '') + '</label>';
+    }).join('') +
+    '<div class="klein">Die übrigen gelten für die Strecken.</div><h3>Umstiege höchstens</h3>' +
     gruppe('umstiegeWert', [0, 1, 2, 3, 9], umstiegeWert, function (v) { return v === 9 ? 'beliebig' : String(v) + (v === 2 ? ' <span class="klein">Standard</span>' : ''); }) +
     '<h3>Fußweg am Anfang und Ende höchstens</h3>' +
     gruppe('fusswegWert', [5, 10, 15, 20], fusswegWert, function (v) { return v + ' min' + (v === 15 ? ' <span class="klein">Standard</span>' : ''); }) +
     '<h3>Umstiegszeit mindestens</h3>' +
     gruppe('umstzeitWert', [2, 5, 10], umstzeitWert, function (v) { return v + ' min' + (v === 2 ? ' <span class="klein">Standard</span>' : ''); }) +
-    '<div class="klein">Gehtempo fest 4 km/h. Auch an der Uhr: Select lang → Einstellungen → Strecken.</div>';
+    '<div class="klein">Gehtempo fest 4 km/h. Auch an der Uhr: Select lang → Einstellungen → Suche.</div>';
 }
 var favWartet = null;
 function listeVerdrahten() {
@@ -701,7 +785,11 @@ document.addEventListener('click', function (ev) {
   if (a === 'layout') { layout = layoutWahl(el.value); return vormerken(); }
   if (a === 'invers') { inversWert = !!el.checked; return vormerken(); }
   if (a === 'kontrast') { kontrastWert = !!el.checked; return vormerken(); }
-  if (a === 'schliessen') { schliessenWert = !!el.checked; return vormerken(); }
+  if (a === 'startseite') { startseiteWert = !!el.checked; return vormerken(); }   // 0.15.0
+  if (a === 'nachAbfahrt') { nachAbfahrtWert = !!el.checked; return vormerken(); }
+  if (a === 'regel') { regelWert = parseInt(el.value, 10) || 0; return vormerken(); }
+  if (a === 'ohne') { ohneWert = el.value === 'eigen' ? eigenMin : parseInt(el.value, 10); return vormerken(); }
+  if (a === 'protLoeschen') { fahrtlogLoeschen = true; vormerken(); return zeigeListe(); }
   if (a === 'speichern') return schliessen(daten());   // Leiste oder Schließen: alles übergeben, Seite zu
   // Strecken und Favoriten (0.6.1)
   if (a === 'rneu') { r = { von: -1, nach: 0 }; return zeigeListe(); }

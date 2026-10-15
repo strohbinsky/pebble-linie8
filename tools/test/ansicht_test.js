@@ -25,15 +25,22 @@ klicke({ 'data-a': 'layout', value: 'led' });          // alte Angabe: wird Papi
 klicke({ 'data-a': 'layout', value: 'klar' });
 klicke({ 'data-a': 'speichern' });
 pruefe(rueck && rueck.layout === 'papier', 'Seite: Rückgabe layout = papier (klar wird Papier)');
-pruefe(rueck && rueck.invers === false && rueck.kontrast === false && rueck.schliessen === false, 'Seite: Invertiert, Kontrast, Schließen aus');
+pruefe(rueck && rueck.invers === false && rueck.kontrast === false, 'Seite: Invertiert, Kontrast aus');
+pruefe(rueck && rueck.startseite === false && rueck.regel === 1 && rueck.nachAbfahrt === true && rueck.ohneTaste === 5, 'Seite: Standard Startseite aus, jede Minute, nach Abfahrt, ohne Taste 5 min (0.15.0)');
+pruefe(!/value="signal"/.test(app.innerHTML), 'Seite: keine Ansicht Signal mehr (0.15.0)');
 // Farben (0.9.1): zweite Seite, Phosphor weiß, invertiert, hoher Kontrast
 var rueck1 = rueck; rueck = null;
 html = seite.replace('/*ZUSTAND*/null', JSON.stringify({ strecken: [strecke], schrift: schrift.F35, rmvKey: '', unterseite: 'anzeige', layout: 'klar' }));
 vm.runInContext(html.substring(html.indexOf('<script>') + 8, html.lastIndexOf('</script>')), ctx);
 pruefe(/value="papier" checked/.test(app.innerHTML) && /data-a="invers">/.test(app.innerHTML), 'Seite: alter Stand Klar zeigt Papier, Invertiert aus');
-klicke({ 'data-a': 'layout', value: 'phosphor_weiss' }); klicke({ 'data-a': 'invers', checked: true }); klicke({ 'data-a': 'kontrast', checked: true }); klicke({ 'data-a': 'schliessen', checked: true });
+klicke({ 'data-a': 'layout', value: 'phosphor_weiss' }); klicke({ 'data-a': 'invers', checked: true }); klicke({ 'data-a': 'kontrast', checked: true });
+klicke({ 'data-a': 'startseite', checked: true }); klicke({ 'data-a': 'regel', value: '5' }); klicke({ 'data-a': 'nachAbfahrt', checked: false });
+klicke({ 'data-a': 'ohne', value: 'eigen' });          // eigene Angabe: Zahlenfeld, Vorgabe 10 min
+pruefe(rueck === null, 'Seite: Vormerken schließt nicht');
+klicke({ 'data-a': 'ohne', value: '-1' });
 klicke({ 'data-a': 'speichern' });
-pruefe(rueck && rueck.layout === 'phosphor_weiss' && rueck.invers === true && rueck.kontrast === true && rueck.schliessen === true, 'Seite: Phosphor weiß, invertiert, Kontrast, schließen');
+pruefe(rueck && rueck.layout === 'phosphor_weiss' && rueck.invers === true && rueck.kontrast === true, 'Seite: Phosphor weiß, invertiert, Kontrast');
+pruefe(rueck && rueck.startseite === true && rueck.regel === 5 && rueck.nachAbfahrt === false && rueck.ohneTaste === -1, 'Seite: Startseite, alle 5 min, nicht nach Abfahrt, nach 10 s schließen (0.15.0)');
 var rueck2 = rueck; rueck = rueck1;
 
 // 2. Handy-Skript: Rückgabe übernehmen, Einrichtung prüfen
@@ -89,10 +96,19 @@ pruefe(speicher.layout === 'phosphor_weiss' && speicher.invers === '1' && speich
 gesendet = []; lauscher.ready(); await warte();
 pruefe(gesendet[0][keys.LAYOUT] === 28, 'Handy: Einrichtung mit LAYOUT = 28');
 lauscher.webviewclosed({ response: encodeURIComponent(JSON.stringify(rueck2)) }); await warte();
-pruefe(speicher.layout === 'phosphor_weiss' && speicher.invers === '1' && speicher.kontrast === '1' && speicher.schliessen === '1', 'Handy: Rückgabe der Seite mit Farben und Schließen gespeichert');
+pruefe(speicher.layout === 'phosphor_weiss' && speicher.invers === '1' && speicher.kontrast === '1', 'Handy: Rückgabe der Seite mit Farben gespeichert');
+pruefe(speicher.startseite === '1' && speicher.regel === '5' && speicher.nachAbfahrt === '0' && speicher.ohneTaste === '-1', 'Handy: Startseite und Aktualisieren gespeichert');
 gesendet = []; lauscher.ready(); await warte();
-pruefe(gesendet[0][keys.LAYOUT] === 60, 'Handy: Einrichtung mit LAYOUT = 60 (4 + 8 + 16 + 32)');
-speicher.invers = '0'; speicher.kontrast = '0'; speicher.schliessen = '0';
+pruefe(gesendet[0][keys.LAYOUT] === 28, 'Handy: Einrichtung mit LAYOUT = 28 (ohne Bit 32 seit 0.15.0)');
+pruefe(gesendet[0][keys.AKTU] === (5 | 32 | (0 << 8)), 'Handy: AKTU = 5 min, Startseite, nach 10 s schließen (' + gesendet[0][keys.AKTU] + ')');
+pruefe(gesendet.some(function (m) { return m[keys.SPRUNG] === 0 && m[keys.RUBRIK] === 3; }), 'Handy: Startseite beim Öffnen (SPRUNG mit RUBRIK 3)');
+pruefe(gesendet.some(function (m) { return m[keys.SEITE] === 8 && m[keys.STATUS] === 4; }), 'Handy: Startseite ohne Standort meldet STATUS 4');
+lauscher.appmessage({ payload: { AKTION: 39, WAHL: 2 | 16 | ((7 + 1) << 8) } }); await warte();   // an der Uhr: alle 2 min, nach Abfahrt, 7 min, Startseite aus
+pruefe(speicher.startseite === '0' && speicher.regel === '2' && speicher.nachAbfahrt === '1' && speicher.ohneTaste === '7', 'Handy: AKTU von der Uhr gespeichert');
+speicher.ohneTaste = undefined; speicher.schliessen = '1';   // Stand bis 0.14.0: App schließen an
+gesendet = []; lauscher.ready(); await warte();
+pruefe((gesendet[0][keys.AKTU] >> 8) === 0, 'Handy: alter Schalter Schließen wird ohne Taste = nach 10 s schließen');
+speicher.invers = '0'; speicher.kontrast = '0'; speicher.schliessen = '0'; speicher.ohneTaste = '5';
 lauscher.appmessage({ payload: { AKTION: 7, WAHL: 2 } });
 await warte();
 gesendet = []; lauscher.ready();

@@ -25,6 +25,11 @@
 // Favoriten (20): beim Speichern fragt die Uhr, was ersetzt wird (L_FRAGE: Bestätigung an der Uhr). Favoriten direkt aus
 // jeder Seite anlegen, Namen am Handy oder per Diktat. Vorschlag FRUEHER DA (ab 10 min früher) auf Seiten mit Ziel und
 // in der aktiven Fahrt; Schnellere Abfahrt (0.38) entfällt dafür. Alle löschen je Rubrik und für Favoriten.
+//
+// 0.15.0 (Seb 2026-10-15): Startseite (nächste Haltestelle, Schalter), Einstellungen AKTUALISIEREN (regelmäßig, nach
+// Abfahrt, ohne Taste) als ein Wert AKTU, Anfrage mit NEU umgeht den Puffer, an die Uhr nur noch kommende Abfahrten.
+// Fahrt: Halte gelten ab ihrer Abfahrt als vorbei, die Uhr bekommt die Zeiten der nächsten drei Halte (K_HT) und zählt
+// selbst weiter; Fahrtprotokoll für die Testfahrt. Ansicht Signal entfernt (gespeichert: Papier).
 
 var keys = require('message_keys');
 var SEITE_HTML = require('./einstellungen_seite');
@@ -121,7 +126,7 @@ function holen(von, nach, linien, fertig, max, ab) {
         liste.push({ t: dl === AUSFALL ? planT : t, l: linienKurz(f.routeShortName), d: dl, zn: f.tripShortName || '', s: steigText(f.from && (f.from.track || f.from.scheduledTrack)), f: dauer,
                      lv: f.routeShortName, r: f.headsign || '', an: an, zs: steigText(f.to && (f.to.track || f.to.scheduledTrack)), tid: f.tripId,
                      mi: StreckenM.verkehrsmittel(f.mode || ''), sp: steigText(f.from && f.from.scheduledTrack), anPlan: Math.floor(Date.parse(f.scheduledEndTime || f.endTime) / 1000),
-                     zw: (f.intermediateStops || []).map(function (h) { return { name: h.name, t: Math.floor(Date.parse(h.arrival || h.departure) / 1000) }; }) });
+                     zw: (f.intermediateStops || []).map(function (h) { return { name: h.name, t: Math.floor(Date.parse(h.departure || h.arrival) / 1000) }; }) });
         live = live || !!f.realTime;
       });
       liste.sort(function (a, b) { return a.t - b.t; });
@@ -191,6 +196,12 @@ function deZuUtc(datum, zeit) {
   return naiv - 3600;
 }
 
+// Halt im Fahrtverlauf (0.15.0): vorbei ab seiner Abfahrt — Echtzeit, sonst Plan; ohne Abfahrt (Endhalt) die Ankunft.
+// Fehlt nur die Echtzeit der Abfahrt, gilt die der Ankunft. Bis 0.14.0 zählte die Ankunft (+30 s auf der Uhr).
+function rmvHaltZeit(h) {
+  function z(t, d) { return t && d ? deZuUtc(d, t) : 0; }
+  return z(h.rtDepTime, h.rtDepDate || h.depDate) || z(h.rtArrTime, h.rtArrDate || h.arrDate) || z(h.depTime, h.depDate) || z(h.arrTime, h.arrDate);
+}
 function rmvAb(t) {                    // '&date=…&time=…' in deutscher Zeit für RMV-Abfragen ab t (UTC)
   var dz = new Date((t + mezVersatz(t)) * 1000).toISOString();
   return '&date=' + dz.slice(0, 10) + '&time=' + dz.slice(11, 16);
@@ -235,10 +246,7 @@ function holenRmv(von, nach, linien, fertig, max, ab) {
                          lv: name, r: l.direction || '', an: dauer ? t + dauer * 60 : 0, zs: steigText(z.rtTrack || z.track),
                          anPlan: z.time ? deZuUtc(z.date, z.time) : 0,                       // für die DB (0.9.0)
                          ref: l.JourneyDetailRef && l.JourneyDetailRef.ref, mi: StreckenM.verkehrsmittel((pr && pr.catOut) || ''), sp: steigText(o.track),
-                         zw: halte.slice(1, -1).map(function (h) {
-                           var hz = h.rtArrTime || h.rtDepTime || h.arrTime || h.depTime, hd = h.rtArrDate || h.rtDepDate || h.arrDate || h.depDate;
-                           return { name: h.name, t: hz && hd ? deZuUtc(hd, hz) : 0 };
-                         }) });
+                         zw: halte.slice(1, -1).map(function (h) { return { name: h.name, t: rmvHaltZeit(h) }; }) });
             live = live || rt;
           });
           liste.sort(function (x, y) { return x.t - y.t; });
@@ -427,22 +435,42 @@ function umkreisText(m) { return m >= 1000 ? (m / 1000) + T('KM', ' km') : m + T
 
 // Ansicht seit 0.13.0: 'papier' (Standard) oder 'phosphor_weiss', dazu unabhängig 'invers' (Papier dunkel, Phosphor hell)
 // und 'kontrast' (keine graue Schrift, nur Phosphor). Alte Werte: 'phosphor' (grün) wird Phosphor weiß; 'klar', 'led'
-// und 'invers' (LED invers als eigene Ansicht bis 0.9.0) werden Papier — LED-Stände dabei nicht invertiert.
-// Phosphor nutzt die Großbuchstaben-Texte ohne Umlaute, Papier die normale Schreibweise.
-var LAYOUTS = ['led', 'klar', 'phosphor', 'invers', 'phosphor_weiss', 'papier', 'signal'];   // Index = Wert in LAYOUT; gesendet nur noch 4, 5 und 6 (Signal seit 0.14.0)
+// und 'invers' (LED invers als eigene Ansicht bis 0.9.0) werden Papier — LED-Stände dabei nicht invertiert. 'signal'
+// (0.14.0) wird seit 0.15.0 ebenfalls Papier. Phosphor nutzt die Großbuchstaben-Texte ohne Umlaute, Papier die normale.
+var LAYOUTS = ['led', 'klar', 'phosphor', 'invers', 'phosphor_weiss', 'papier'];   // Index = Wert in LAYOUT; gesendet nur 4 und 5
 function altLed() { var v = localStorage.getItem('layout'); return v === 'led' || v === 'invers'; }
-function layout() { var v = localStorage.getItem('layout'); return v === 'phosphor' || v === 'phosphor_weiss' ? 'phosphor_weiss' : v === 'signal' ? 'signal' : 'papier'; }
+function layout() { var v = localStorage.getItem('layout'); return v === 'phosphor' || v === 'phosphor_weiss' ? 'phosphor_weiss' : 'papier'; }
 function invers() { return !altLed() && localStorage.getItem('invers') === '1'; }
 function kontrast() { return localStorage.getItem('kontrast') === '1'; }
-function schliessen() { return localStorage.getItem('schliessen') === '1'; }   // App nach 10 s ohne Taste zu (0.9.2, Standard aus)
-// LAYOUT an der Uhr: Grundansicht + 8 invertiert + 16 hoher Kontrast + 32 App schließen
-function layoutWert() { return LAYOUTS.indexOf(layout()) | (invers() ? 8 : 0) | (kontrast() ? 16 : 0) | (schliessen() ? 32 : 0); }
+// LAYOUT an der Uhr: Grundansicht + 8 invertiert + 16 hoher Kontrast (+ 32 App schließen bis 0.14.0, seit 0.15.0 in AKTU)
+function layoutWert() { return LAYOUTS.indexOf(layout()) | (invers() ? 8 : 0) | (kontrast() ? 16 : 0); }
 function layoutMerken(w) {
   var b = w & 7, led = b === 0 || b === 3;
-  localStorage.setItem('layout', b === 2 || b === 4 ? 'phosphor_weiss' : b === 6 ? 'signal' : 'papier');
+  localStorage.setItem('layout', b === 2 || b === 4 ? 'phosphor_weiss' : 'papier');
   localStorage.setItem('invers', !led && (w & 8) ? '1' : '0');
   localStorage.setItem('kontrast', w & 16 ? '1' : '0');
-  localStorage.setItem('schliessen', w & 32 ? '1' : '0');
+}
+
+// Startseite und Aktualisieren (0.15.0), an der Uhr unter Anzeige bzw. Aktualisieren. An die Uhr als ein Wert AKTU:
+// Bit 0–3 Minuten regelmäßig (0 = nur beim Öffnen), Bit 4 nach Abfahrt, Bit 5 Startseite, Bit 8–15 ohne Taste + 1.
+// ohneTaste: -1 nach 10 s schließen, 0 immer weiter laden, 1–60 nach so vielen Minuten nicht mehr laden (Standard 5).
+// Bis 0.14.0 gab es nur den Schalter 'schliessen' (= ohneTaste -1); er wird beim ersten Lesen übernommen.
+var REGEL = [1, 2, 5, 0];
+function startseite() { return localStorage.getItem('startseite') === '1'; }
+function regel() { var v = parseInt(localStorage.getItem('regel'), 10); return REGEL.indexOf(v) >= 0 ? v : 1; }
+function nachAbfahrt() { return localStorage.getItem('nachAbfahrt') !== '0'; }
+function ohneTaste() {
+  var v = parseInt(localStorage.getItem('ohneTaste'), 10);
+  if (isNaN(v)) return localStorage.getItem('schliessen') === '1' ? -1 : 5;
+  return v >= -1 && v <= 60 ? v : 5;
+}
+function aktuWert() { return regel() | (nachAbfahrt() ? 16 : 0) | (startseite() ? 32 : 0) | ((ohneTaste() + 1) << 8); }
+function aktuMerken(w) {
+  var r = w & 15, o = ((w >> 8) & 255) - 1;
+  localStorage.setItem('regel', String(REGEL.indexOf(r) >= 0 ? r : 1));
+  localStorage.setItem('nachAbfahrt', w & 16 ? '1' : '0');
+  localStorage.setItem('startseite', w & 32 ? '1' : '0');
+  localStorage.setItem('ohneTaste', String(o >= -1 && o <= 60 ? o : 5));
 }
 function T(led, klar) { return layout() !== 'phosphor_weiss' ? klar : led; }   // Text je nach Ansicht
 
@@ -480,6 +508,7 @@ function einrichtungSenden() {
   msg[keys.QUELLWAHL] = QUELLEN.indexOf(quelle());
   msg[keys.ABFAHRT] = abfahrt() === 'aktuell' ? 1 : 0;
   msg[keys.DAUER] = dauer() === 'an' ? 1 : 0;
+  msg[keys.AKTU] = aktuWert();
   for (var i = 0; i < liste.length && i < MAXS; i++) {
     var b = liste[i].b, stadt = L.stadtVon(liste[i].a.name);
     msg[keys.NAME_A + i] = liste[i].a.kurz;
@@ -493,10 +522,14 @@ function einrichtungSenden() {
 
 // Lädt die Abfahrten einer Seite aus einer Quelle. fertig(msg) bei Erfolg, fertig(null, fehler) sonst.
 // Mit Ziel: Verbindungssuche mit Fahrtdauer. Ohne Ziel: Abfahrten der Haltestelle mit Endziel (AB_Z, AB_ZK).
+// An die Uhr nur noch kommende (0.15.0, wie naechste() auf der Uhr: Abfahrt ab jetzt). Geholt und gepuffert werden mehr
+// (SEITE_N), damit nach einer Abfahrt gleich wieder drei dastehen. Die Nummer der Details zählt in dieser Liste.
+var SEITE_N = MAXD + 3;
+function kommende(fahrten) { var j = jetztS(); return (fahrten || []).filter(function (x) { return x.t >= j; }); }
 function seiteNachricht(st, erg) {
-  var stadt = L.stadtVon(st.a.name), msg = {};
+  var stadt = L.stadtVon(st.a.name), msg = {}, fahrten = kommende(erg.fahrten);
     for (var j = 0; j < MAXD; j++) {
-      var x = erg.fahrten[j];
+      var x = fahrten[j];
       msg[keys.AB + j] = x ? x.t : 0;
       msg[keys.AB_L + j] = x ? x.l : '';
       msg[keys.AB_D + j] = x ? x.d : 0;
@@ -516,9 +549,9 @@ function seiteHolen(st, quelle, fertig) {
   }
   // Transitous kennt Haltestellen per Kennung, RMV per Haltestellen-Objekt (Name, Koordinaten)
   if (st.b) {
-    if (quelle === 'RMV') holenRmv(st.a, st.b, linien, cb); else holen(st.a.id, st.b.id, linien, cb);
+    if (quelle === 'RMV') holenRmv(st.a, st.b, linien, cb, SEITE_N); else holen(st.a.id, st.b.id, linien, cb, SEITE_N);
   } else {
-    if (quelle === 'RMV') tafelRmv(st.a, linien, cb); else tafelTransitous(st.a, linien, cb);
+    if (quelle === 'RMV') tafelRmv(st.a, linien, cb, 0, SEITE_N); else tafelTransitous(st.a, linien, cb, 0, SEITE_N);
   }
 }
 
@@ -554,12 +587,15 @@ function pufferSchreiben(k, daten) {
 function ortKennung(o) { return o ? (o.id || (o.lat !== undefined ? o.lat.toFixed(4) + ',' + o.lon.toFixed(4) : o.name)) : ''; }
 function pufferHalt(st) { return ['H', quelle() + (dbSchluessel() ? '+db' : ''), ortKennung(st.a), ortKennung(st.b), (linienFuer(st) || []).join(',')].join('|'); }
 
-function streckeLaden(i, detail) {
+function streckeLaden(i, detail, neu) {
   var st = strecken()[i];
-  if (st) abfahrtenLaden(st, i, null, 'seite', detail);
+  if (st) abfahrtenLaden(st, i, null, 'seite', detail, { neu: neu });
 }
 // detail >= 0: zusätzlich die Detailzeilen dieser Abfahrt (0.6.1), siehe detailAbfahrtSenden
-function abfahrtenLaden(st, i, extra, kanal, detail) {
+// opt.neu (0.15.0): Anfrage nach einer Abfahrt (NEU) — den Puffer zeigen (an die Uhr gehen ohnehin nur kommende), aber
+// auf jeden Fall neu holen. opt.gezeigt: der Puffer ist schon an der Uhr (Startseite), nur noch holen, wenn er alt ist.
+function abfahrtenLaden(st, i, extra, kanal, detail, opt) {
+  opt = opt || {};
   var nr = ladeNrn[kanal] = (ladeNrn[kanal] || 0) + 1;
   var pk = pufferHalt(st), p = pufferLesen(pk);
   function senden2(msg, quelle, erg, stand, mitDetail) {
@@ -579,12 +615,12 @@ function abfahrtenLaden(st, i, extra, kanal, detail) {
     });
     if (detail === VORSCHLAG) return vorschlagDetailSenden(0, i);
     if (detail === LISTE) return fahrtenDetailSenden(0, i);
-    if (erg && mitDetail !== false && detail !== undefined && detail >= 0) detailAbfahrtSenden(st, i, erg.fahrten, detail, quelle, function () { return nr !== ladeNrn[kanal]; }, stand || jetztS());
+    if (erg && mitDetail !== false && detail !== undefined && detail >= 0) detailAbfahrtSenden(st, i, kommende(erg.fahrten), detail, quelle, function () { return nr !== ladeNrn[kanal]; }, stand || jetztS());
   }
   if (p) {                               // gepuffert: sofort zeigen; frisch genug -> fertig
-    var frisch = p.alter < FRISCH_S;
-    console.log('Puffer ' + kanal + ' Seite ' + (i + 1) + ': ' + p.alter + ' s alt' + (frisch ? '' : ', lade neu'));
-    senden2(seiteNachricht(st, p.erg), p.q, p.erg, p.t, frisch);
+    var frisch = p.alter < FRISCH_S && !opt.neu;
+    console.log('Puffer ' + kanal + ' Seite ' + (i + 1) + ': ' + p.alter + ' s alt' + (frisch ? '' : opt.neu ? ', nach Abfahrt neu' : ', lade neu'));
+    if (!opt.gezeigt) senden2(seiteNachricht(st, p.erg), p.q, p.erg, p.t, frisch);
     if (frisch) return;
   }
   function transitous() {
@@ -618,10 +654,10 @@ function merken(i) {
 // Mal bleibt. Sonst die Seite mit dem nächsten Start (L.seiteNachOrt). Die Uhr springt nur, solange man noch nicht
 // selbst geblättert oder das Menü geöffnet hat, und fordert die Seite dann selbst an (REQUEST).
 var BEWEGT = 300, GLEICH_NAH = 50;   // Meter
-function standortSprung() {
+function standortSprung(pos0) {         // pos0: Standort schon bekannt (Startseite, 0.15.0)
   var liste = strecken();
   if (liste.length < 2) return;
-  standort(function (pos) {
+  (pos0 ? function (f) { f(pos0); } : standort)(function (pos) {
     if (!pos) return;
     var vorher = null;
     try { vorher = JSON.parse(localStorage.getItem('ort')); } catch (e) {}
@@ -650,6 +686,7 @@ Pebble.addEventListener('ready', function () {      // App geöffnet
     var m = {}; m[keys.SPRUNG] = 0; m[keys.RUBRIK] = RUBRIK_FAHRT; senden(m);
     console.log('Aktive Fahrt: ' + a.titel.klar + ' bis ' + hm(a.ende));
   }
+  if (startseite() && !a) return startseiteLaden(kurz);   // 0.15.0: Startseite, die Seiten laden erst bei Hoch/Runter
   if (rubrik() === 1) { if (routen().length) { routeLaden(aktiveRoute()); if (!kurz && !a) routenSprung(); } return; }
   if (strecken().length) { merken(aktiveSeite()); streckeLaden(aktiveSeite()); if (!kurz && !a) standortSprung(); }
 });
@@ -660,7 +697,7 @@ function wert(p, k) { return p[k] !== undefined ? p[k] : p[keys[k]]; }
 // Uhr -> Handy: REQUEST (Seite) + RUBRIK + DETAIL (Nummer der Abfahrt/Verbindung, -1 = keine), oder AKTION + WAHL (+ TEXT)
 Pebble.addEventListener('appmessage', function (e) {
   var p = e.payload || {};
-  var aktion = wert(p, 'AKTION'), rub = wert(p, 'RUBRIK'), det = wert(p, 'DETAIL');
+  var aktion = wert(p, 'AKTION'), rub = wert(p, 'RUBRIK'), det = wert(p, 'DETAIL'), neu = wert(p, 'NEU') === 1;
   if (det === undefined) det = -1;
   localStorage.setItem('offen', String(jetztS()));
   if (ablauf && ablauf.fahrten && aktion === undefined && det !== LISTE) ablauf = null;   // WEITERE FAHRTEN verlassen
@@ -670,11 +707,11 @@ Pebble.addEventListener('appmessage', function (e) {
   if (rub === 1) {
     localStorage.setItem('rubrik', '1');
     if (s !== undefined) localStorage.setItem('rseite', String(s));
-    return routeLaden(aktiveRoute(), det);
+    return routeLaden(aktiveRoute(), det, neu);
   }
   if (rub === 0) localStorage.setItem('rubrik', '0');
   if (s !== undefined) { localStorage.setItem('seite', String(s)); merken(aktiveSeite()); }
-  streckeLaden(aktiveSeite(), det);
+  streckeLaden(aktiveSeite(), det, neu);
 });
 
 // ---------- Uhr-Menü: Seiten an der Uhr anlegen, ändern, löschen ----------
@@ -688,6 +725,7 @@ var A_R_NEU = 20, A_R_LOESCHEN = 21, A_R_RUECK = 22, A_SOFORT = 23, A_SOFORT_NR 
     A_UMSTIEGE = 28, A_FUSSWEG = 29, A_UMSTZEIT = 30;
 var A_ALLE_LOESCHEN = 34, A_FAV_SEITE = 35, A_SOFORT_SPEICHERN = 36;   // 0.8.0
 var A_R_ANKUNFT = 37;                   // 0.11.0
+var A_AKTU = 39;                        // 0.15.0
 var BLOCK = 10;        // muss zu L_TEXT[10] in package.json passen
 var MAXL = 300;        // muss zu MAXL in main.c passen
 var VTXT = 64;         // Vorschlag FRUEHER DA, beide Zeilen (Puffer auf der Uhr, 0.12.0)
@@ -832,7 +870,7 @@ function standort(fertig) {
   navigator.geolocation.getCurrentPosition(
     function (p) {
       console.log('Menü: Standort ' + p.coords.latitude.toFixed(2) + ',' + p.coords.longitude.toFixed(2));
-      ende({ lat: p.coords.latitude, lon: p.coords.longitude });
+      ende({ lat: p.coords.latitude, lon: p.coords.longitude, gen: Math.round(p.coords.accuracy || 0) });   // gen: Genauigkeit (m)
     },
     function (e) { ende(null, e.message || ('Fehler ' + e.code)); },
     { timeout: 10000, maximumAge: 60000 });
@@ -1138,7 +1176,7 @@ function menueAktion2(aktion, wahl, p, det) {
   if (aktion === A_R_LOESCHEN) return routeLoeschen(wahl);
   if (aktion === A_R_RUECK) return routeRueck(wahl);
   if (aktion === A_R_ANKUNFT) return ankunftWaehlen(wahl);
-  if (aktion === A_SOFORT_NR) return sofortLaden(wahl, det);
+  if (aktion === A_SOFORT_NR) return sofortLaden(wahl, det, wert(p, 'NEU') === 1);
   if (aktion === A_R_NEU) { neuerAblauf(wahl); return schrittVon(); }
   if (aktion === A_SOFORT) { neuerAblauf(-1); return schrittSofort(); }
   if (aktion === A_FAVORITEN) { neuerAblauf(-1); return schrittFavoriten(); }
@@ -1152,6 +1190,11 @@ function menueAktion2(aktion, wahl, p, det) {
     localStorage.setItem(k, String(wahl));
     console.log('Menü: Umstiege ' + umstiege() + ', Fußweg ' + fussweg() + ', Umstiegszeit ' + umstzeit());
     if (rubrik() === 1 && routen().length) routeLaden(aktiveRoute());
+    return;
+  }
+  if (aktion === A_AKTU) {               // Startseite, Aktualisieren (0.15.0): an der Uhr gewählt, dort schon wirksam
+    aktuMerken(wahl);
+    console.log('Menü: Startseite ' + startseite() + ', regelmäßig ' + regel() + ', nach Abfahrt ' + nachAbfahrt() + ', ohne Taste ' + ohneTaste());
     return;
   }
   if (aktion === A_LAYOUT) {             // an der Uhr umgeschaltet: merken, damit Seite und Listen passen
@@ -1196,7 +1239,7 @@ function menueAktion2(aktion, wahl, p, det) {
   if (aktion === A_FAHRT_START) return fahrtStarten(wahl);
   if (aktion === A_VERPASST) return verpasstWaehlen();
   if (aktion === A_FAHRT_ENDE) { aktivSchreiben(null); senden(fahrtNachricht(null)); console.log('Fahrt beendet'); return menueEnde(true); }
-  if (aktion === A_HIER) return hierLaden(wahl, det);
+  if (aktion === A_HIER) return hierLaden(wahl, det, wert(p, 'NEU') === 1);
   if (aktion === A_FAHRTEN) return fahrtenListe(wert(p, 'RUBRIK') === 1 ? 1 : 0, wahl);
   if (!ablauf) return menueEnde();
   if (aktion === A_ZURUECK && ablauf.frage !== undefined) {   // Frage weggedrückt: in 2 min wieder fragen
@@ -1436,37 +1479,75 @@ function fahrtenDetailSenden(rub, seite) {
 // Menü > Abfahrten hier: nächste Haltestelle vom Standort, alle Linien mit Endziel, ohne eine Seite anzulegen.
 // Auf der Uhr blättert hoch/runter zur nächstnäheren (WAHL = Nummer in der Liste, das Handy rechnet sie um).
 // Nummer 0 holt den Standort neu, andere nutzen die Liste von eben (bis 10 min alt). Platz HIER hinter den Seiten.
-var HIER = MAXS, hierListe = null;
-function hierLaden(k, detail) {
+// Seit 0.15.0 auch die Startseite (Nummer 0). Die Liste bleibt im Speicher ('hier'), solange man sich unter 150 m bewegt
+// und sie jünger als 10 min ist, wird sie nicht neu geholt; HIER_M ist die Entfernung zur Haltestelle in Metern.
+var HIER = MAXS, hierListe = null, HIER_ALT_MS = 600000;
+function hierListeLesen() { try { return JSON.parse(localStorage.getItem('hier') || 'null'); } catch (e) { return null; } }
+function hierExtra(h, i, n, pos) {
+  var stadt = L.stadtVon(h.name), extra = {};
+  extra[keys.S_FAV] = (istFav(h) ? 1 : 0) | (istFav(sofortAktuell) ? 2 : 0);
+  extra[keys.HIER_NAME] = L.utf8Kuerzen(L.kurzname(h.name, stadt), 31);
+  extra[keys.HIER_KLAR] = L.utf8Kuerzen(L.klarname(h.name, stadt), 31);
+  extra[keys.HIER_NR] = i;
+  extra[keys.HIER_N] = n;
+  extra[keys.HIER_M] = Math.round((pos ? L.entfernung(pos.lat, pos.lon, h.lat, h.lon) : h.m || 0) / 10) * 10;
+  return extra;
+}
+// nachOrt(pos): Standort, sobald er da ist (Startseite: E1 für Hoch/Runter); gezeigt: Kennung der Haltestelle, deren
+// Puffer die Uhr schon hat (Startseite beim Öffnen)
+function hierLaden(k, detail, neu, nachOrt, gezeigt) {
   function fehlerAn(status, led, klar) {
     var m = {};
     m[keys.SEITE] = HIER; m[keys.STATUS] = status; m[keys.HIER_NAME] = led; m[keys.HIER_KLAR] = klar;
     m[keys.STAND] = Math.floor(Date.now() / 1000);
     senden(m);
   }
-  function weiter() {
+  function weiter(pos) {
     var liste = hierListe.liste, n = liste.length;
     if (!n) return fehlerAn(STATUS_FEHLER, 'NICHTS IN DER NAEHE', 'Nichts in der Nähe');
-    var i = ((k % n) + n) % n, h = liste[i], stadt = L.stadtVon(h.name), extra = {};
+    var i = ((k % n) + n) % n, h = liste[i];
     hierAktuell = h;
-    extra[keys.S_FAV] = (istFav(h) ? 1 : 0) | (istFav(sofortAktuell) ? 2 : 0);
-    extra[keys.HIER_NAME] = L.utf8Kuerzen(L.kurzname(h.name, stadt), 31);
-    extra[keys.HIER_KLAR] = L.utf8Kuerzen(L.klarname(h.name, stadt), 31);
-    extra[keys.HIER_NR] = i;
-    extra[keys.HIER_N] = n;
     console.log('Hier: ' + (i + 1) + '/' + n + ' ' + h.name + ' ' + h.m + ' m');
-    abfahrtenLaden({ a: halt(h), b: null, alle: true, linien: [] }, HIER, extra, 'hier', detail);
+    abfahrtenLaden({ a: halt(h), b: null, alle: true, linien: [] }, HIER, hierExtra(h, i, n, pos), 'hier', detail,
+                   { neu: neu, gezeigt: !!gezeigt && gezeigt === h.id });
   }
-  if (k !== 0 && hierListe && Date.now() - hierListe.zeit < 600000) return weiter();
+  if (k !== 0 && hierListe && Date.now() - hierListe.zeit < HIER_ALT_MS) return weiter();
   standort(function (pos) {
-    if (!pos) return fehlerAn(STATUS_FEHLER, 'KEIN STANDORT', 'Kein Standort');
+    if (nachOrt) nachOrt(pos);
+    if (!pos) return fehlerAn(STATUS_STANDORT, 'KEIN STANDORT', 'Kein Standort');
+    var l = hierListe || hierListeLesen();
+    if (l && l.lat !== undefined && Date.now() - l.zeit < HIER_ALT_MS && L.entfernung(l.lat, l.lon, pos.lat, pos.lon) < PUFFER_ORT_M) {
+      hierListe = l;                     // kaum bewegt: Liste von eben
+      return weiter(pos);
+    }
     L.naechsteHaltestellen(pos.lat, pos.lon, NAH, function (f, liste) {
       if (f) return fehlerAn(f === 'kein Netz' ? STATUS_NETZ : STATUS_FEHLER, 'KEINE HALTESTELLEN', 'Keine Haltestellen');
-      hierListe = { liste: liste, zeit: Date.now() };
-      weiter();
+      hierListe = { liste: liste, zeit: Date.now(), lat: pos.lat, lon: pos.lon };
+      try { localStorage.setItem('hier', JSON.stringify(hierListe)); } catch (e) {}
+      weiter(pos);
     });
   });
 }
+// Startseite beim Öffnen (0.15.0): zuerst der Puffer der Haltestelle vom letzten Mal (wartet nicht auf den Standort),
+// dann der Standort — unter 150 m bewegt bleibt sie, sonst die nächste. Ohne Standort STATUS_STANDORT: die Uhr zeigt
+// dann wie bisher die letzte Rubrik. Mit dem Standort stellt E1 die Seiten, die Hoch und Runter zeigen.
+function startseiteLaden(kurz) {
+  var l = hierListeLesen(), h = l && l.liste && l.liste[0], gezeigt = null;
+  var m = {}; m[keys.SPRUNG] = 0; m[keys.RUBRIK] = RUBRIK_START; senden(m);
+  if (h) {
+    var p = pufferLesen(pufferHalt({ a: halt(h), b: null, alle: true, linien: [] }));
+    if (p) {
+      var msg = seiteNachricht({ a: halt(h) }, p.erg), extra = hierExtra(h, 0, l.liste.length, null);
+      Object.keys(extra).forEach(function (k) { msg[k] = extra[k]; });
+      msg[keys.SEITE] = HIER; msg[keys.RUBRIK] = 0; msg[keys.QUELLE] = quelleText(p.q, p.erg && p.erg.db); msg[keys.STAND] = p.t;
+      senden(msg);
+      gezeigt = h.id;
+      console.log('Startseite: Puffer ' + h.name + ', ' + p.alter + ' s alt');
+    }
+  }
+  hierLaden(0, -1, false, function (pos) { if (pos && !kurz) { standortSprung(pos); routenSprung(pos); } }, gezeigt);
+}
+var RUBRIK_START = 3;                   // wie in main.c
 
 // ---------- Detailansicht (seit 0.6.1) ----------
 // Zeilen von oben nach unten (Art, Zeit, Text, Zusatz, Steig), in Blöcken zu 8 an die Uhr (D_AB, D_N im ersten Block).
@@ -1550,7 +1631,8 @@ function fahrtStarten(rub) {
   fahrtOeffnen();
 }
 function fahrtOeffnen() { var m = {}; m[keys.L_TITEL] = ''; m[keys.L_ANZAHL] = -6; senden(m, true); }
-// Halte einer Fahrt mit Echtzeit: [{ name, ab, an, abPlan, anPlan, steig, aus }]
+// Halte einer Fahrt mit Echtzeit: [{ name, ab, an, abPlan, anPlan, steig, aus, t, lat, lon }]. t (0.15.0): ab wann der
+// Halt vorbei ist — Abfahrt (Echtzeit, sonst Plan), am Endhalt die Ankunft; lat/lon fürs Fahrtprotokoll
 function fahrtHalte(ref, tid, fertig) {
   function sek(x) { return x ? Math.floor(Date.parse(x) / 1000) : 0; }
   function trip() {
@@ -1559,7 +1641,8 @@ function fahrtHalte(ref, tid, fertig) {
       if (!l) return fertig(null);
       fertig([l.from].concat(l.intermediateStops || [], [l.to]).map(function (h) {
         return { name: h.name, ab: sek(h.departure), an: sek(h.arrival), abPlan: sek(h.scheduledDeparture) || sek(h.departure),
-                 anPlan: sek(h.scheduledArrival) || sek(h.arrival), steig: steigText(h.track || h.scheduledTrack), aus: !!h.cancelled };
+                 anPlan: sek(h.scheduledArrival) || sek(h.arrival), steig: steigText(h.track || h.scheduledTrack), aus: !!h.cancelled,
+                 t: sek(h.departure) || sek(h.arrival), lat: h.lat, lon: h.lon };
       }));
     });
   }
@@ -1570,7 +1653,8 @@ function fahrtHalte(ref, tid, fertig) {
       fertig(d.Stops.Stop.map(function (h) {
         var abP = z(h.depTime, h.depDate), anP = z(h.arrTime, h.arrDate);
         return { name: h.name, abPlan: abP, anPlan: anP, ab: z(h.rtDepTime, h.rtDepDate || h.depDate) || abP, an: z(h.rtArrTime, h.rtArrDate || h.arrDate) || anP,
-                 steig: steigText(h.rtDepTrack || h.depTrack || h.rtArrTrack || h.arrTrack), aus: !!(h.cancelled || h.cancelledDeparture) };
+                 steig: steigText(h.rtDepTrack || h.depTrack || h.rtArrTrack || h.arrTrack), aus: !!(h.cancelled || h.cancelledDeparture),
+                 t: rmvHaltZeit(h), lat: h.lat === undefined ? undefined : +h.lat, lon: h.lon === undefined ? undefined : +h.lon };
       }));
     });
   }
@@ -1595,7 +1679,7 @@ function abschnittNeu(l, halte) {      // Zeiten, Steige, Zwischenhalte eines Ab
     if (halte[iv].aus) l.ausfall = true;
   }
   if (ina >= 0) { l.an = halte[ina].an || l.an; if (halte[ina].steig) l.nachSteig = halte[ina].steig; }
-  if (iv >= 0 && ina > iv) l.zwischen = halte.slice(iv + 1, ina).map(function (h) { return { name: h.name, t: h.an || h.ab }; });
+  if (iv >= 0 && ina > iv) l.zwischen = halte.slice(iv + 1, ina).map(function (h) { return { name: h.name, t: h.t, lat: h.lat, lon: h.lon }; });
 }
 function fussNachziehen(v) {           // Fußwege hängen an den Fahrten davor bzw. (am Anfang) an der ersten Fahrt
   var legs = v.legs;
@@ -1616,7 +1700,7 @@ function fahrtAktualisieren(a, fertig) {
         var f = a.f, iv = haltSuchen(h, a.startRoh, 0, f.abPlan), ina = haltSuchen(h, f.zielName, iv + 1, 0);
         if (iv >= 0) { f.ab = h[iv].ab || f.ab; f.del = Math.round((f.ab - f.abPlan) / 60); if (h[iv].steig) f.steig = h[iv].steig; if (h[iv].aus) f.ausfall = true; }
         if (ina >= 0) { f.an = h[ina].an || f.an; if (h[ina].steig) f.zielSteig = h[ina].steig; if (!f.anPlan) f.anPlan = h[ina].anPlan; }
-        if (iv >= 0 && ina > iv) f.zwischen = h.slice(iv + 1, ina).map(function (x) { return { name: x.name, t: x.an || x.ab }; });
+        if (iv >= 0 && ina > iv) f.zwischen = h.slice(iv + 1, ina).map(function (x) { return { name: x.name, t: x.t, lat: x.lat, lon: x.lon }; });
       }
       dbFahrt(a, function () { a.ende = fahrtEnde(a); fertig(a); });   // Zug: DB drüber (0.9.0)
     });
@@ -1724,11 +1808,15 @@ function karteBauen(a, v, ph, t) {
     zeile('', h.name(B.nach) + (letzte && !fussNach(legs, ph.li) ? T(', ZIEL', ', Ziel') : ''), '', '', 4 | 32);
     k.fuss = T('AN ', 'an ') + an;          // 0.8.0: Fuß links die Ankunft, rechts der Stand (Umstiege stehen im Verlauf)
   } else if (ph.phase === 2 || ph.phase === 4) {
-    var C = legs[ph.li], kom = (C.zwischen || []).filter(function (x) { return x.t > t - 30; });
+    var C = legs[ph.li], kom = (C.zwischen || []).filter(function (x) { return x.t > t; });   // vorbei ab Abfahrt (0.15.0)
     k.kopf = imMittel(C) + ' ' + linie(C);
     k.zeit = C.an; k.zeitl = T('BIS AUSSTIEG', 'bis Ausstieg');
     if (C.zwischen && C.zwischen.length) k.halte = kom.length + 1;
     k.r1 = T('NAECHSTER', 'nächster'); k.r2 = L.utf8Kuerzen(kom.length ? h.name(kom[0].name) : h.name(C.nach), 12); k.rf = 0;
+    if (C.zwischen && C.zwischen.length) {   // die Uhr zählt selbst weiter (0.15.0): Zeit und Name der nächsten drei Halte
+      k.ht = kom.slice(0, 3).map(function (x) { return x.t; });
+      k.hn = kom.slice(0, 3).map(function (x) { return L.utf8Kuerzen(h.name(x.name), 12); });
+    }
     k.label = T('AUSSTEIGEN', 'aussteigen'); k.name = h.name(C.nach); k.steig = C.nachSteig || '';
     warnungen(C, true);
     var fn = fussNach(legs, ph.li);
@@ -1772,6 +1860,7 @@ function karteSenden(k) {
     m[keys.K_S + i] = L.utf8Kuerzen(z.s, 3); m[keys.K_F + i] = i < k.zeilen.length ? z.f | 128 : 0;   // 128 = Zeile belegt
   }
   m[keys.K_FUSS] = L.utf8Kuerzen(k.fuss || '', 27);
+  for (var j = 0; j < 3; j++) { m[keys.K_HT + j] = (k.ht && k.ht[j]) || 0; m[keys.K_HN + j] = (k.hn && k.hn[j]) || ''; }
   senden(m);
 }
 function aktZeile(z, ph, v) {          // welche Detailzeile im Verlauf markiert wird
@@ -1787,7 +1876,7 @@ function aktZeile(z, ph, v) {          // welche Detailzeile im Verlauf markiert
     r = fz;
     for (var i = fz + 1; fz >= 0 && i < z.length && z[i].leg === li; i++) {
       var a2 = z[i].art & 31;
-      if ((a2 === 2 || a2 === 3 || a2 === 4) && z[i].t && z[i].t >= jetzt - 30) { r = i; break; }
+      if ((a2 === 2 || a2 === 3 || a2 === 4) && z[i].t && z[i].t > jetzt) { r = i; break; }   // vorbei ab Abfahrt (0.15.0)
     }
   }
   else { r = f(function (x, a) { return a === 10 && x.leg === v.legs.length - 1; }); if (r < 0) r = z.length - 1; }
@@ -1930,16 +2019,45 @@ function fahrtSenden() {
     senden(fahrtNachricht(a2));
     var pos = fahrtOrt && jetztS() - fahrtOrt.t < 120 ? fahrtOrt : null;
     var ph = zeigen(a2, pos);
-    if (!fragen(a2, ph)) standort(function (p) {
-      if (!p) return;
-      fahrtOrt = { lat: p.lat, lon: p.lon, t: jetztS() };
+    if (fragen(a2, ph)) return protokoll(a2, ph, null);
+    standort(function (p) {
+      if (!p) return protokoll(a2, ph, null);
+      fahrtOrt = { lat: p.lat, lon: p.lon, gen: p.gen, t: jetztS() };
       var b = aktivLesen();
       if (!b || b.seit !== a2.seit) return;
       var ph2 = fahrtPhase(fahrtV(b), jetztS(), fahrtOrt);
       if (ph2.phase !== ph.phase || ph2.k !== ph.k || ph2.wartet !== ph.wartet) { console.log('Fahrt: Standort ändert die Phase ' + ph.phase + ' -> ' + ph2.phase); ph2 = zeigen(b, fahrtOrt); }
+      protokoll(b, ph2, fahrtOrt);
       if (!fragen(b, ph2)) frueherPruefen(b, ph2, fahrtOrt);
     });
   });
+}
+// ---------- Fahrtprotokoll (0.15.0) für die Testfahrt ----------
+// Je Abfrage der aktiven Fahrt (etwa jede Minute): Zeit, Standort des Handys mit Genauigkeit, Phase und im Fahrzeug die
+// erwarteten Abfahrten der Halte bis zum Ausstieg (die eben vorbeigefahrenen 2 min lang mit). Daraus lässt sich ablesen,
+// wann die Uhr umsprang (sie zählt ab der Abfahrt weiter) und wann man wirklich am Halt war (Standort) — Grundlage für
+// Punkt C (Standort als Korrektur). Bleibt auf dem Handy, zu sehen auf der Einstellungsseite unter Fahrtprotokoll.
+// Höchstens die letzten 3 Fahrten mit je 150 Einträgen; o: Koordinaten der Halte, soweit die Quelle sie liefert.
+var PROT_FAHRTEN = 3, PROT_N = 150;
+function protokollLesen() { try { return JSON.parse(localStorage.getItem('fahrtlog') || '[]') || []; } catch (e) { return []; } }
+function protokoll(a, ph, pos) {
+  try {
+    var v = fahrtV(a), l = v.legs[ph.li], log = protokollLesen(), f = log[0];
+    if (!f || f.seit !== a.seit) { f = { seit: a.seit, titel: TT(a.titel), e: [], o: {} }; log.unshift(f); }
+    var e = { t: jetztS(), ph: ph.phase };
+    if (pos) { e.lat = +pos.lat.toFixed(5); e.lon = +pos.lon.toFixed(5); if (pos.gen) e.gen = pos.gen; }
+    if (l && !l.fuss && (ph.phase === 2 || ph.phase === 4)) {
+      e.l = l.linie;
+      e.h = (l.zwischen || []).concat([{ name: l.nach, t: l.an, lat: l.nachLat, lon: l.nachLon }]).filter(function (x) { return x.t > e.t - 120; })
+        .map(function (x) {
+          if (x.lat !== undefined && x.lat !== null && !f.o[x.name]) f.o[x.name] = [+(+x.lat).toFixed(5), +(+x.lon).toFixed(5)];
+          return [x.name, x.t];
+        });
+    }
+    f.e.push(e);
+    if (f.e.length > PROT_N) f.e = f.e.slice(-PROT_N);
+    localStorage.setItem('fahrtlog', JSON.stringify(log.slice(0, PROT_FAHRTEN)));
+  } catch (err) { console.log('Fahrtprotokoll: ' + err); }
 }
 function zeigen(a, pos) {
   var v = fahrtV(a), t = jetztS(), ph = fahrtPhase(v, t, pos);
@@ -1995,10 +2113,7 @@ function detailAbfahrtSenden(st, seite, fahrten, nr, quelle, veraltet, stand, nr
   if (quelle === 'RMV' && x.ref) {
     return rmvGet('journeyDetail?id=' + encodeURIComponent(x.ref), function (f, d) {
       if (f !== null) return fertig(basis);
-      abHier((d.Stops && d.Stops.Stop) || [], function (h) {
-        var z = h.rtDepTime || h.depTime || h.rtArrTime || h.arrTime, dt = h.rtDepDate || h.depDate || h.rtArrDate || h.arrDate;
-        return z && dt ? deZuUtc(dt, z) : 0;
-      });
+      abHier((d.Stops && d.Stops.Stop) || [], rmvHaltZeit);
     });
   }
   if (x.tid) {
@@ -2136,14 +2251,14 @@ function startOrt(r, fertig) {             // fester Start oder Standort des Han
 }
 
 // Lädt Strecke i (oder die Sofort-Strecke HIER) und schickt Übersicht, bei detail >= 0 auch die Detailzeilen.
-function routeLaden(i, detail) {
+function routeLaden(i, detail, neu) {
   var r = routen()[i];
-  if (r) verbindungenLaden(r, i, null, 'route', detail);
+  if (r) verbindungenLaden(r, i, null, 'route', detail, neu);
 }
 // Puffer wie bei den Haltestellen; ab Standort gilt er nur, solange man sich kaum bewegt hat (PUFFER_ORT_M).
 var PUFFER_ORT_M = 150;
 function pufferRoute(r) { return ['R', quelle() + (dbSchluessel() ? '+db' : ''), r.von ? ortKennung(r.von) : 'HIER', ortKennung(r.nach), umstiege(), fussweg(), umstzeit()].join('|'); }
-function verbindungenLaden(r, i, extra, kanal, detail) {
+function verbindungenLaden(r, i, extra, kanal, detail, neu) {   // neu (0.15.0): nach einer Abfahrt, Puffer nicht abwarten
   var nr = ladeNrn[kanal] = (ladeNrn[kanal] || 0) + 1;
   var zt = kanal === 'route' ? ankunftZiel(r) : 0;
   var pk = pufferRoute(r) + (zt ? '|an' + zt : ''), p = pufferLesen(pk);
@@ -2158,8 +2273,8 @@ function verbindungenLaden(r, i, extra, kanal, detail) {
   }
   if (p) {                               // gepuffert: sofort zeigen (ab Standort: vom Ort des Puffers aus)
     console.log('Puffer ' + kanal + ' Strecke ' + (i + 1) + ': ' + p.alter + ' s alt');
-    zeigen(p.liste, p.q, p.t, p.alter < FRISCH_S);
-    if (p.alter < FRISCH_S && r.von) return;
+    zeigen(p.liste, p.q, p.t, p.alter < FRISCH_S && !neu);
+    if (p.alter < FRISCH_S && r.von && !neu) return;
   }
   startOrt(r, function (von) {
     if (veraltet()) return;
@@ -2167,7 +2282,7 @@ function verbindungenLaden(r, i, extra, kanal, detail) {
       if (p) return;                     // kein Standort: der Puffer bleibt stehen
       var m0 = {}; m0[keys.STATUS] = STATUS_STANDORT; m0[keys.R_N] = 0; return an(m0, '');
     }
-    if (p && p.alter < FRISCH_S && p.von && L.entfernung(p.von.lat, p.von.lon, von.lat, von.lon) < PUFFER_ORT_M) return;
+    if (!neu && p && p.alter < FRISCH_S && p.von && L.entfernung(p.von.lat, p.von.lon, von.lat, von.lon) < PUFFER_ORT_M) return;
     verbindungenHolen(von, r.nach, function (f, liste, q) {
       if (veraltet()) return;
       if (f !== null) {
@@ -2226,22 +2341,22 @@ function sofortListe() {
   var f = favSortiert();
   return f.concat(zuletztListe().filter(function (z) { return !f.some(function (x) { return gleicherOrt(x, z); }); }));
 }
-function sofortLaden(k, detail) {
+function sofortLaden(k, detail, neu) {
   var liste = sofortListe(), n = liste.length;
   if (!n) { var m = {}; m[keys.RUBRIK] = 1; m[keys.SEITE] = HIER; m[keys.STATUS] = STATUS_FEHLER; m[keys.R_N] = 0; m[keys.HIER_NAME] = 'KEIN ZIEL'; m[keys.HIER_KLAR] = 'Kein Ziel'; return senden(m); }
   var i = ((k % n) + n) % n, o = liste[i], extra = {};
   sofortAktuell = o;
   extra[keys.S_FAV] = (istFav(hierAktuell) ? 1 : 0) | (istFav(o) ? 2 : 0);
   extra[keys.HIER_NAME] = o.kurz; extra[keys.HIER_KLAR] = o.klar; extra[keys.HIER_NR] = i; extra[keys.HIER_N] = n;
-  verbindungenLaden({ von: null, nach: o }, HIER, extra, 'sofort', detail);
+  verbindungenLaden({ von: null, nach: o }, HIER, extra, 'sofort', detail, neu);
 }
 
 // Startseite der Strecken nach Standort: ein fester Start in der Nähe (500 m) zuerst; sonst bleibt die Seite, außer
 // man steht schon an ihrem Ziel (unter 300 m) — dann die nächste, deren Ziel weiter weg ist. Kaum bewegt: nichts.
-function routenSprung() {
+function routenSprung(pos0) {
   var liste = routen();
   if (liste.length < 2) return;
-  standort(function (pos) {
+  (pos0 ? function (f) { f(pos0); } : standort)(function (pos) {
     if (!pos) return;
     var vorher = null;
     try { vorher = JSON.parse(localStorage.getItem('rort')); } catch (e) {}
@@ -2791,7 +2906,8 @@ var seitenOrt = null;                    // Standort für die Seite, beim Wieder
 function seiteOeffnen(standort, standortFehler) {
   if (standort) seitenOrt = standort;
   var zustand = { strecken: strecken(), standort: standort || seitenOrt, standortFehler: standortFehler, schrift: SCHRIFT.F35,
-                  rmvKey: rmvSchluessel(), dbId: localStorage.getItem('dbId') || '', dbKey: localStorage.getItem('dbKey') || '', layout: layout(), invers: invers(), kontrast: kontrast(), schliessen: schliessen(), umkreis: umkreis(), quelle: quelle(), abfahrt: abfahrt(), dauer: dauer(),
+                  rmvKey: rmvSchluessel(), dbId: localStorage.getItem('dbId') || '', dbKey: localStorage.getItem('dbKey') || '', layout: layout(), invers: invers(), kontrast: kontrast(), umkreis: umkreis(), quelle: quelle(), abfahrt: abfahrt(), dauer: dauer(),
+                  startseite: startseite(), regel: regel(), nachAbfahrt: nachAbfahrt(), ohneTaste: ohneTaste(), fahrtlog: protokollLesen(),   // 0.15.0
                   routen: routen(), favoriten: favoriten(), umstiege: umstiege(), fussweg: fussweg(), umstzeit: umstzeit() };
   var html = SEITE_HTML.replace('/*ZUSTAND*/null', function () { return JSON.stringify(zustand); });
   Pebble.openURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
@@ -2823,7 +2939,11 @@ Pebble.addEventListener('webviewclosed', function (e) {
     if (LAYOUTS.indexOf(daten.layout) >= 0 && daten.layout !== 'invers' && daten.layout !== 'led') localStorage.setItem('layout', daten.layout);
     if (daten.invers !== undefined) localStorage.setItem('invers', daten.invers ? '1' : '0');
     if (daten.kontrast !== undefined) localStorage.setItem('kontrast', daten.kontrast ? '1' : '0');
-    if (daten.schliessen !== undefined) localStorage.setItem('schliessen', daten.schliessen ? '1' : '0');
+    if (daten.startseite !== undefined) localStorage.setItem('startseite', daten.startseite ? '1' : '0');   // 0.15.0
+    if (REGEL.indexOf(daten.regel) >= 0) localStorage.setItem('regel', String(daten.regel));
+    if (daten.nachAbfahrt !== undefined) localStorage.setItem('nachAbfahrt', daten.nachAbfahrt ? '1' : '0');
+    if (typeof daten.ohneTaste === 'number' && daten.ohneTaste >= -1 && daten.ohneTaste <= 60) localStorage.setItem('ohneTaste', String(Math.round(daten.ohneTaste)));
+    if (daten.fahrtlogLoeschen) localStorage.setItem('fahrtlog', '[]');
     if (QUELLEN.indexOf(daten.quelle) >= 0) localStorage.setItem('quelle', daten.quelle);
     if (daten.abfahrt === 'plan' || daten.abfahrt === 'aktuell') localStorage.setItem('abfahrt', daten.abfahrt);
     if (daten.dauer === 'an' || daten.dauer === 'aus') localStorage.setItem('dauer', daten.dauer);
