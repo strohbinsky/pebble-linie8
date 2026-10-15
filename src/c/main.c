@@ -82,7 +82,11 @@ enum { E_ANZEIGE, E_QUELLE, E_UMKREIS, E_ABF, E_STRECKEN, E_FAVORITEN };        
 enum { ES_UMSTIEGE, ES_FUSSWEG, ES_UMSTZEIT, ES_ALLE };                            // Einstellungen > Strecken
 // Zwei Ansichten seit 0.13.0. LAYOUT vom Handy: 5 Papier, 4 Phosphor weiß; alte Werte 0-3 (LED, Klar, Phosphor grün,
 // LED invers) werden beim Lesen umgesetzt: Phosphor grün -> Phosphor weiß, alles andere -> Papier.
-enum { LAYOUT_PAPIER = 1, LAYOUT_PHOSPHOR = 2 };
+// Seit 0.14.0 dritte Ansicht Signal (LAYOUT 6): modern, Weiß auf Schwarz, Linienfarben, große Minuten. Zeichnet über
+// den Weg von Papier (k_…), eigene Seite, Strecke, Fahrtkarte, Kopf und Fuß. Invertiert: Schwarz auf Weiß.
+enum { LAYOUT_PAPIER = 1, LAYOUT_PHOSPHOR = 2, LAYOUT_SIGNAL = 3 };
+#define SIGNAL (s_layout == LAYOUT_SIGNAL)
+#define KLAR_ART (s_layout != LAYOUT_PHOSPHOR)   // Papier und Signal: Systemschrift, Umlaute
 // LAYOUT (Nachricht, Speicher) seit 0.9.1: Grundansicht (0 LED, 1 Klar, 2 Phosphor grün, 4 Phosphor weiß; 3 = LED invers
 // bis 0.9.0) + 8 invertiert + 16 hoher Kontrast + 32 App nach RUHE_MS schließen (0.9.2, Standard aus)
 #define LW_INVERS 8
@@ -106,7 +110,7 @@ enum { A_NEU = 1, A_RUECKFAHRT = 2, A_AENDERN = 3, A_LOESCHEN = 4,
        A_EINST = -1, A_ANSICHT = -2,                               // -3 LED bis 0.11.0, -4 Klar und -9 Phosphor grün bis 0.12.0
        A_UMK = -5, A_SET_U500 = -6, A_SET_U1000 = -7, A_SET_U2000 = -8,
        A_QLL = -10, A_SET_QAUTO = -11, A_SET_QRMV = -12, A_SET_QTRANS = -13,
-       A_ABF_UM = -14, A_DAUER_UM = -15, A_SET_PAPIER = -16, A_SET_PWEISS = -17, A_HIER_START = -18, A_INVERS_UM = -60, A_KONTRAST_UM = -61, A_SCHLIESSEN_UM = -62 };   // negative: nur auf der Uhr                        // AKTION an das Handy, wie in index.js
+       A_ABF_UM = -14, A_DAUER_UM = -15, A_SET_PAPIER = -16, A_SET_PWEISS = -17, A_HIER_START = -18, A_INVERS_UM = -60, A_KONTRAST_UM = -61, A_SCHLIESSEN_UM = -62, A_SET_SIGNAL = -63 };   // negative: nur auf der Uhr                        // AKTION an das Handy, wie in index.js
 
 static Window *s_window;
 static Layer *s_layer;
@@ -273,10 +277,20 @@ static GColor hex(uint32_t v) { return GColorFromHEX(v); }
 static GFont s_f_uhr, s_f14, s_f14b, s_f18, s_f18b, s_f24b, s_f28b;
 static GFont s_roboto32;
 static void schriften_setzen(void) {           // Papier: fette Systemschrift, Ziffern aus Roboto (erst bei Bedarf geladen)
-  if (s_layout == LAYOUT_PAPIER && !s_roboto32) s_roboto32 = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_ROBOTO_BOLD_32));
+  if (KLAR_ART && !s_roboto32) s_roboto32 = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_ROBOTO_BOLD_32));
   s_f_uhr = s_roboto32;
   s_f14 = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
   s_f18 = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+}
+// Signal: Farben für einen hellen bzw. dunklen Grund (auch für die weiße Karte der nächsten Abfahrt). Grau nur
+// als Zweitschrift mit Kontrast ab 7:1 (#AAAAAA auf Schwarz, #555555 auf Weiß), Linien in der jeweils anderen Stufe.
+static void sig_farben(bool hell) {
+  s_pal.k_papier = hell ? GColorWhite : GColorBlack;
+  s_pal.k_tinte  = hell ? GColorBlack : GColorWhite;
+  s_pal.k_dunkel = s_pal.k_lgrau = hex(hell ? 0x555555 : 0xAAAAAA);
+  s_pal.k_grau   = hex(hell ? 0xAAAAAA : 0x555555);
+  s_pal.k_orange = hex(hell ? 0xAA5500 : 0xFFAA00);
+  s_pal.k_rot    = hex(hell ? 0xAA0000 : 0xFF5555);
 }
 static void farben_setzen(void) {              // setzt auch die Schriften, die hängen an der Ansicht
   schriften_setzen();
@@ -298,6 +312,7 @@ static void farben_setzen(void) {              // setzt auch die Schriften, die 
   // Papier: nie Grau (Seb 2026-10-12). Phosphor: nur mit hohem Kontrast. Linien, Raster, Farbhinweise bleiben
   s_pal.k_grau = s_pal.k_dunkel = s_pal.k_tinte;
   s_pal.k_lgrau = s_pal.k_papier;
+  if (SIGNAL) sig_farben(s_invers);                    // Signal: normal dunkel, invertiert hell; Grau erlaubt
   if (s_kontrast) s_pal.p_grau = s_pal.p_hell = s_pal.p_schwach = s_pal.p_text;
 }
 // Balken (0.13.0): eine Zeile wie die gewählte Menüzeile — Grund in Schriftfarbe, alles darin in der Grundfarbe.
@@ -311,13 +326,13 @@ static Palette pal_balken(void) {
   return alt;
 }
 static int layout_wert(void) {
-  return (s_layout == LAYOUT_PHOSPHOR ? 4 : 5) | (s_invers ? LW_INVERS : 0) | (s_kontrast ? LW_KONTRAST : 0) | (s_schliessen ? LW_SCHLIESSEN : 0);
+  return (s_layout == LAYOUT_PHOSPHOR ? 4 : SIGNAL ? 6 : 5) | (s_invers ? LW_INVERS : 0) | (s_kontrast ? LW_KONTRAST : 0) | (s_schliessen ? LW_SCHLIESSEN : 0);
 }
 static int s_umkreis = 1000;      // Meter; das Handy führt den Wert, die Uhr zeigt und ändert ihn
 static int s_quelle = QUELLE_AUTO; // Quelle der Abfahrten; das Handy führt den Wert, wie beim Umkreis
 static int s_abfahrt = ABF_PLAN;   // vorne die Fahrplanzeit (Standard) oder die aktuelle mit Verspätung
 static bool s_dauer = true;        // Fahrtdauer zum Ziel zeigen (Standard an)
-#define T(led, klar) (s_layout == LAYOUT_PAPIER ? (klar) : (led))   // Menütexte je Ansicht
+#define T(led, klar) (KLAR_ART ? (klar) : (led))   // Menütexte je Ansicht
 static int s_lanz, s_lsel, s_loben;
 static char s_ladetext[LTXT];
 static AppTimer *s_ladetimer;
@@ -601,6 +616,7 @@ static void k_flaeche(GContext *ctx, GRect r, GColor c) {
 
 // Papier: Text t im Rahmen r; zu lang -> läuft (Regel oben). Systemschrift lässt sich nicht beschneiden: links und
 // rechts von r wird die Zeile zy..zy+zh mit bg übermalt. Deshalb zeichnet jede Zeile ihren Lauftext zuerst.
+static int s_lauf_x0 = 0, s_lauf_x1 = 200;      // übermalt wird nur zwischen diesen Kanten (Signal: innerhalb der Karte)
 static void lauf_k(GContext *ctx, const char *t, GFont f, GRect r, GColor c, GColor bg, int zy, int zh) {
   const int w = k_breite(t, f);
   const int v = w > r.size.w ? lauf_versatz(w) : 0;
@@ -609,13 +625,15 @@ static void lauf_k(GContext *ctx, const char *t, GFont f, GRect r, GColor c, GCo
   graphics_context_set_text_color(ctx, c);
   graphics_draw_text(ctx, t, f, GRect(x, r.origin.y, w + 4, r.size.h), GTextOverflowModeFill, GTextAlignmentLeft, NULL);
   graphics_draw_text(ctx, t, f, GRect(x + w + LAUF_LUECKE, r.origin.y, w + 4, r.size.h), GTextOverflowModeFill, GTextAlignmentLeft, NULL);
-  k_flaeche(ctx, GRect(0, zy, r.origin.x, zh), bg);
-  k_flaeche(ctx, GRect(x1, zy, 200 - x1, zh), bg);
+  k_flaeche(ctx, GRect(s_lauf_x0, zy, r.origin.x - s_lauf_x0, zh), bg);
+  k_flaeche(ctx, GRect(x1, zy, s_lauf_x1 - x1, zh), bg);
 }
 
 // Fußbalken: links Text (optional mit farbigem Punkt), rechts der Stand (grau, ab 2 min orange). Seit 0.8.0 ohne Uhr.
+#define SIG_AKZENT GColorFromHEX(0xFF5500)
 static void k_fuss(GContext *ctx, const char *links, bool punkt, GColor farbe, int32_t stand) {
-  k_flaeche(ctx, GRect(0, 210, 200, 18), K_TINTE);
+  const GColor schrift = SIGNAL ? K_DUNKEL : K_PAPIER;  // Signal: kein Balken, Zweitschrift auf dem Grund
+  if (!SIGNAL) k_flaeche(ctx, GRect(0, 210, 200, 18), K_TINTE);
   int x = 6;
   if (punkt) {
     graphics_context_set_fill_color(ctx, farbe);
@@ -627,15 +645,22 @@ static void k_fuss(GContext *ctx, const char *links, bool punkt, GColor farbe, i
   const int sw = st[0] ? k_breite(st, s_f14b) + 4 : 0;
   // Papier: fett, nur wenn es in die Zeile passt — sonst normal statt abgeschnitten
   const GFont fl = k_breite(links, s_f14) > 194 - sw - x ? fonts_get_system_font(FONT_KEY_GOTHIC_14) : s_f14;
-  k_text(ctx, links, fl, GRect(x, 209, 194 - sw - x, 18), GTextAlignmentLeft, K_PAPIER);
+  k_text(ctx, links, fl, GRect(x, 209, 194 - sw - x, 18), GTextAlignmentLeft, schrift);
   if (st[0]) k_text(ctx, st, s_f14b, GRect(194 - sw, 209, sw, 18), GTextAlignmentRight, stand_alt(stand) ? K_LORANGE : K_LGRAU);
 }
 // Kopfbalken (0.8.0): links der Titel, rechts die Uhrzeit fett
 static void k_kopf(GContext *ctx, const char *titel, GColor farbe) {
   char uhr[8];
   uhr_text(uhr, sizeof(uhr));
-  k_flaeche(ctx, GRect(0, 0, 200, 26), K_TINTE);
   const int uw = k_breite(uhr, s_f18b) + 8;
+  if (SIGNAL) {                                        // Signal: Titel auf dem Grund, Uhrzeit grau, Linie in Akzentfarbe
+    k_flaeche(ctx, GRect(0, 0, 200, 26), K_PAPIER);
+    lauf_k(ctx, titel, s_f18b, GRect(6, -1, 188 - uw, 24), K_TINTE, K_PAPIER, 0, 23);
+    k_text(ctx, uhr, s_f18b, GRect(194 - uw, -1, uw, 24), GTextAlignmentRight, K_DUNKEL);
+    k_flaeche(ctx, GRect(6, 23, 188, 2), SIG_AKZENT);
+    return;
+  }
+  k_flaeche(ctx, GRect(0, 0, 200, 26), K_TINTE);
   lauf_k(ctx, titel, s_f18b, GRect(6, -1, 188 - uw, 24), farbe, K_TINTE, 0, 26);
   k_text(ctx, uhr, s_f18b, GRect(194 - uw, -1, uw, 24), GTextAlignmentRight, K_PAPIER);
 }
@@ -908,6 +933,30 @@ static void k_rubrik(GContext *ctx) {
   k_text(ctx, s_rubrik ? "Strecken" : "Abfahrten", s_f24b, GRect(16, 98, 168, 30), GTextAlignmentCenter, K_PAPIER);
 }
 
+// Fuß der Anzeige: Quelle und Zustand links mit Punkt, Stand rechts (Papier und Signal)
+static void k_anzeige_fuss(GContext *ctx) {
+  char buf[48];
+  int32_t stand = 0;
+  const char *quelle = "";
+  const int status = seiten_status(&stand, &quelle);
+  GColor farbe = K_GRAU;
+  switch (status) {
+    case ST_LADE:   snprintf(buf, sizeof(buf), "Lade ..."); break;
+    case ST_NETZ:   snprintf(buf, sizeof(buf), "Kein Netz"); farbe = GColorRed; break;
+    case ST_FEHLER: snprintf(buf, sizeof(buf), "Fehler"); farbe = GColorRed; break;
+    case ST_STANDORT: snprintf(buf, sizeof(buf), "Kein Standort"); farbe = GColorRed; break;
+    case ST_SOLL: case ST_LIVE: {
+      const bool rmv = !strncmp(quelle, "RMV", 3), db = strstr(quelle, "DB") != NULL;   // "RMV+DB" / "TR+DB" seit 0.9.0
+      if (!strncmp(quelle, "AN", 2)) snprintf(buf, sizeof(buf), "Ankunft bis %s", quelle + 2);   // Ankommen um (0.11.0)
+      else snprintf(buf, sizeof(buf), "%s%s %s", rmv ? "RMV" : "Transitous", db ? " + DB" : "", status == ST_LIVE ? "live" : "Fahrplan");
+      farbe = status == ST_LIVE ? GColorFromHEX(0x55FF00) : GColorFromHEX(0xFFAA00);
+      break;
+    }
+    default: buf[0] = '\0';
+  }
+  k_fuss(ctx, buf, buf[0] != '\0', farbe, (status == ST_SOLL || status == ST_LIVE) ? stand : 0);   // Stand rechts
+}
+
 static void k_anzeige(GContext *ctx) {
   const time_t now = time(NULL);
   char buf[48];
@@ -939,25 +988,7 @@ static void k_anzeige(GContext *ctx) {
                        GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
   }
 
-  int32_t stand = 0;
-  const char *quelle = "";
-  const int status = seiten_status(&stand, &quelle);
-  GColor farbe = K_GRAU;
-  switch (status) {
-    case ST_LADE:   snprintf(buf, sizeof(buf), "Lade ..."); break;
-    case ST_NETZ:   snprintf(buf, sizeof(buf), "Kein Netz"); farbe = GColorRed; break;
-    case ST_FEHLER: snprintf(buf, sizeof(buf), "Fehler"); farbe = GColorRed; break;
-    case ST_STANDORT: snprintf(buf, sizeof(buf), "Kein Standort"); farbe = GColorRed; break;
-    case ST_SOLL: case ST_LIVE: {
-      const bool rmv = !strncmp(quelle, "RMV", 3), db = strstr(quelle, "DB") != NULL;   // "RMV+DB" / "TR+DB" seit 0.9.0
-      if (!strncmp(quelle, "AN", 2)) snprintf(buf, sizeof(buf), "Ankunft bis %s", quelle + 2);   // Ankommen um (0.11.0)
-      else snprintf(buf, sizeof(buf), "%s%s %s", rmv ? "RMV" : "Transitous", db ? " + DB" : "", status == ST_LIVE ? "live" : "Fahrplan");
-      farbe = status == ST_LIVE ? GColorFromHEX(0x55FF00) : GColorFromHEX(0xFFAA00);
-      break;
-    }
-    default: buf[0] = '\0';
-  }
-  k_fuss(ctx, buf, buf[0] != '\0', farbe, (status == ST_SOLL || status == ST_LIVE) ? stand : 0);   // Stand rechts
+  k_anzeige_fuss(ctx);
   k_rubrik(ctx);
 }
 
@@ -973,7 +1004,7 @@ static void info_zeile(int k, char *buf, size_t n) {
 static int liste_versatz(void) {
   const int n = info_n();
   if (!n || s_modus != M_LISTE) return 0;
-  return s_layout == LAYOUT_PHOSPHOR ? n * 16 + 6 : s_layout == LAYOUT_PAPIER ? n * 20 + 4 : 0;
+  return s_layout == LAYOUT_PHOSPHOR ? n * 16 + 6 : n * 20 + 4;
 }
 static void k_liste(GContext *ctx) {
   char buf[32];
@@ -1265,7 +1296,7 @@ static void p_d_zeile(GContext *ctx, int b, int y, time_t now) {
   if (!d_umbruch(b)) lauf_p(ctx, z->text, PD_NAME_X, rand, y + 4, 3, haupt);
 }
 static bool punkt_einzeilig(const Zeile *z) {
-  return s_layout == LAYOUT_PAPIER ? klar_einzeilig(z) : phosphor_einzeilig(z);
+  return KLAR_ART ? klar_einzeilig(z) : phosphor_einzeilig(z);
 }
 static void p_detail(GContext *ctx) {
   const time_t now = time(NULL);
@@ -1546,11 +1577,239 @@ static void k_karte(GContext *ctx) {
   k_fuss(ctx, s_k->fuss, false, K_TINTE, s_dstand);
 }
 
+// ---------- Ansicht „Signal“ (0.14.0, Entwurf linie8-signal-entwurf.png) ----------
+// Kopf: Name groß auf dem Grund, Uhrzeit grau, Akzentlinie; darunter klein „nach …“ bzw. Rubrik und rechts die Seite.
+// Drei Zeilen je SIG_DY: Linienkästchen in Linienfarbe, oben Zeit (mit Ziel) bzw. Endziel, unten klein Steig/Zeit,
+// rechts die Minuten groß. Die nächste Abfahrt steht auf einer Karte in Schriftfarbe (wie die gewählte Menüzeile).
+#define SIG_Y0 52
+#define SIG_DY 52
+static GColor linienfarbe(const char *lin) {           // feste Farbe je Linienname (keine Linienfarben vom Handy)
+  static const uint32_t F[] = { 0x0055FF, 0xAA00AA, 0xFF5500, 0x005555, 0xAA0000, 0x5500AA };
+  uint32_t h = 0;
+  for (; *lin; lin++) h = h * 31 + (uint8_t)*lin;
+  return hex(F[h % ARRAY_LENGTH(F)]);
+}
+static int sig_kasten_w(const char *lin) { int w = k_breite(lin, s_f18b) + 10; return w < 28 ? 28 : w > 60 ? 60 : w; }
+static int sig_kasten(GContext *ctx, const char *lin, int x, int y) {   // Linienkästchen, gibt die rechte Kante zurück
+  const int w = sig_kasten_w(lin);
+  graphics_context_set_fill_color(ctx, linienfarbe(lin));
+  graphics_fill_rect(ctx, GRect(x, y, w, 22), 4, GCornersAll);
+  k_text(ctx, lin, s_f18b, GRect(x, y - 3, w, 24), GTextAlignmentCenter, GColorWhite);
+  return x + w;
+}
+// Karte der nächsten Abfahrt: Fläche in Schriftfarbe, danach die Farben für den umgekehrten Grund. Rückgabe: alte Palette
+static Palette sig_karte_an(GContext *ctx, int yy) {
+  const Palette alt = s_pal;
+  graphics_context_set_fill_color(ctx, K_TINTE);
+  graphics_fill_rect(ctx, GRect(4, yy + 1, 192, SIG_DY - 4), 7, GCornersAll);
+  sig_farben(!s_invers);
+  s_lauf_x0 = 6; s_lauf_x1 = 194;
+  return alt;
+}
+// Rechts: Minuten groß, "min" klein. zeichnen = false: nur die linke Kante (vor den Lauftexten, die rechts übermalen)
+static int sig_minuten(GContext *ctx, int32_t t, time_t now, int yy, bool zeichnen) {
+  const int min = rest_min(t, now);
+  if (min >= 100) return 192;
+  char rs[8];
+  snprintf(rs, sizeof(rs), "%d", min);
+  const int ew = k_breite("min", s_f14b), zw = k_breite(rs, s_f_uhr);
+  if (zeichnen) {
+    k_text(ctx, "min", s_f14b, GRect(192 - ew, yy + 22, ew + 2, 18), GTextAlignmentLeft, K_DUNKEL);
+    k_text(ctx, rs, s_f_uhr, GRect(190 - ew - zw - 2, yy + 3, zw + 4, 40), GTextAlignmentRight, K_TINTE);
+  }
+  return 190 - ew - zw - 6;
+}
+static void sig_kopf(GContext *ctx, const char *titel, const char *unter) {
+  char uhr[8], sz[16];
+  uhr_text(uhr, sizeof(uhr));
+  const int uw = k_breite(uhr, s_f18b) + 6;
+  lauf_k(ctx, titel, s_f24b, GRect(6, -5, 194 - uw - 6, 30), K_TINTE, K_PAPIER, 0, 28);
+  k_text(ctx, uhr, s_f18b, GRect(194 - uw, 0, uw, 24), GTextAlignmentRight, K_DUNKEL);
+  k_flaeche(ctx, GRect(6, 28, 188, 2), SIG_AKZENT);
+  seitenzeichen(sz, sizeof(sz), false);
+  const int sw = k_breite(sz, s_f14b) + 4;
+  lauf_k(ctx, unter, s_f14b, GRect(6, 31, 188 - sw, 18), K_DUNKEL, K_PAPIER, 32, 17);
+  k_text(ctx, sz, s_f14b, GRect(194 - sw, 31, sw, 18), GTextAlignmentRight, K_DUNKEL);
+}
+static void sig_seite(GContext *ctx, const Strecke *s, time_t now) {
+  const bool ziel = hat_ziel(s);
+  char unter[NAMELEN + 8];
+  if (ziel) snprintf(unter, sizeof(unter), "nach %s", k_name1(s));
+  else snprintf(unter, sizeof(unter), "%s", s_hier ? "Abfahrten hier" : "Abfahrten");
+  sig_kopf(ctx, k_name0(s), unter);
+  int idx[MAXD];
+  const int n = naechste(s, now, idx);
+  for (int k = 0; k < MAXD; k++) {
+    const int yy = SIG_Y0 + k * SIG_DY;
+    if (vt_str(s)[0] && k == MAXD - 1) { k_vorschlag(ctx, vt_str(s), yy + 4); continue; }
+    if (k >= n) {
+      if (k == 0) k_text(ctx, "keine Fahrt", s_f18b, GRect(8, yy + 10, 184, 24), GTextAlignmentLeft, K_DUNKEL);
+      continue;
+    }
+    const Palette alt = k == 0 ? sig_karte_an(ctx, yy) : s_pal;
+    const GColor grund = K_PAPIER;
+    const int i = idx[k], v = s->del[i];
+    const int xt = 10 + sig_kasten_w(s->lin[i]) + 6;
+    char zeit[16], unten[40], buf[12];
+    int h, m;
+    const int vz = (v == AUSFALL || s_abfahrt == ABF_AKTUELL) ? 0 : v;   // aktuell: Zeit mit Verspätung, orange
+    berlin_hm(s->dep[i] - vz * 60, &h, &m);
+    snprintf(zeit, sizeof(zeit), "%02d:%02d", h, m);
+    const int rand = v == AUSFALL ? 192 : sig_minuten(ctx, s->dep[i], now, yy, false);
+    const GColor zc = v == AUSFALL ? K_DUNKEL : (v != vz ? K_ORANGE : K_TINTE);
+    buf[0] = '\0';
+    if (vz != 0) snprintf(buf, sizeof(buf), "%+d'", vz);
+    unten[0] = '\0';                                   // unten: Steig und Fahrtdauer (ohne Ziel hinter der Zeit)
+    if (s->steig[i][0]) snprintf(unten, sizeof(unten), "Steig %s", s->steig[i]);
+    if (ziel && s_dauer && s->dur[i] > 0) snprintf(unten + strlen(unten), sizeof(unten) - strlen(unten), "%s%d' Fahrt", unten[0] ? " · " : "", s->dur[i]);
+    if (ziel) {
+      lauf_k(ctx, unten, s_f14b, GRect(xt, yy + 27, rand - xt, 18), K_DUNKEL, grund, yy + 29, 16);   // Lauftexte zuerst
+      k_text(ctx, zeit, s_f24b, GRect(xt, yy - 1, 80, 30), GTextAlignmentLeft, zc);
+      if (buf[0]) k_text(ctx, buf, s_f18b, GRect(xt + k_breite(zeit, s_f24b) + 3, yy + 4, 40, 24), GTextAlignmentLeft, K_ORANGE);
+    } else {                                           // ohne Ziel: oben das Endziel, unten Zeit, Verspätung, Steig
+      const int xs = xt + k_breite(zeit, s_f14b) + 4 + (buf[0] ? k_breite(buf, s_f14b) + 4 : 0);
+      if (unten[0]) lauf_k(ctx, unten, s_f14b, GRect(xs, yy + 27, rand - xs, 18), K_DUNKEL, grund, yy + 29, 16);
+      lauf_k(ctx, s->endk[i][0] ? s->endk[i] : s->end[i], s_f18b, GRect(xt, yy + 3, rand - xt, 24), K_TINTE, grund, yy + 6, 18);
+      k_text(ctx, zeit, s_f14b, GRect(xt, yy + 27, 60, 18), GTextAlignmentLeft, gcolor_equal(zc, K_TINTE) ? K_DUNKEL : zc);
+      if (buf[0]) k_text(ctx, buf, s_f14b, GRect(xt + k_breite(zeit, s_f14b) + 4, yy + 27, 40, 18), GTextAlignmentLeft, K_ORANGE);
+    }
+    sig_kasten(ctx, s->lin[i], 10, yy + 14);
+    if (v != AUSFALL) sig_minuten(ctx, s->dep[i], now, yy, true);
+    if (v == AUSFALL) k_text(ctx, "fällt aus", s_f18b, GRect(100, yy + 12, 92, 24), GTextAlignmentRight, K_ROT);
+    if (k > 0 && k < MAXD - 1) k_flaeche(ctx, GRect(10, yy + SIG_DY - 2, 180, 1), K_GRAU);
+    s_pal = alt;
+    s_lauf_x0 = 0; s_lauf_x1 = 200;
+  }
+}
+static void sig_route(GContext *ctx, const Route *r, time_t now) {
+  char unter[NAMELEN + 8];
+  snprintf(unter, sizeof(unter), "ab %s", k_rvon(r));
+  sig_kopf(ctx, k_rziel(r), unter);
+  int idx[MAXD];
+  const int n = route_naechste(r, now, idx);
+  for (int k = 0; k < MAXD; k++) {
+    const int yy = SIG_Y0 + k * SIG_DY;
+    if (vt_rt(r)[0] && k == MAXD - 1) { k_vorschlag(ctx, vt_rt(r), yy + 4); continue; }
+    if (k >= n) {
+      if (k == 0 && r->status != ST_LADE)
+        k_text(ctx, r->status == ST_STANDORT ? "kein Standort" : "keine Verbindung", s_f18b, GRect(8, yy + 10, 184, 24), GTextAlignmentLeft, K_DUNKEL);
+      continue;
+    }
+    const Palette alt = k == 0 ? sig_karte_an(ctx, yy) : s_pal;
+    const GColor grund = K_PAPIER;
+    const int i = idx[k];
+    const bool ausfall = r->del[i] == AUSFALL;
+    // Kästchen: die ganze Linienkette, wenn sie passt, sonst die erste Linie
+    char lin[LINLEN + 4];
+    const char *ke = r->kette[i];
+    int j = 0;
+    while (ke[j] && ke[j] != ' ' && j < (int)sizeof(lin) - 1) { lin[j] = ke[j]; j++; }
+    lin[j] = '\0';
+    const char *kasten = k_breite(ke, s_f18b) + 10 <= 60 ? ke : (lin[0] ? lin : "?");
+    const int xt = 10 + sig_kasten_w(kasten) + 6;
+    char zeit[8], an[32], buf[12];
+    int h, m;
+    berlin_hm(r->los[i], &h, &m); snprintf(zeit, sizeof(zeit), "%02d:%02d", h, m);
+    const int rand = sig_minuten(ctx, r->los[i], now, yy, false);
+    berlin_hm(r->an[i], &h, &m);
+    const char *warn = route_warnung(r, i, true);
+    if (warn[0]) snprintf(an, sizeof(an), "an %02d:%02d · %s", h, m, warn);
+    else if (r->um[i]) snprintf(an, sizeof(an), "an %02d:%02d · %d Umst.", h, m, r->um[i]);
+    else snprintf(an, sizeof(an), "an %02d:%02d · direkt", h, m);
+    lauf_k(ctx, an, s_f14b, GRect(xt, yy + 27, rand - xt, 18), warn[0] ? K_ROT : K_DUNKEL, grund, yy + 29, 16);
+    k_text(ctx, zeit, s_f24b, GRect(xt, yy - 1, 80, 30), GTextAlignmentLeft, ausfall ? K_DUNKEL : K_TINTE);
+    if (r->del[i] > 0 && !ausfall) {
+      snprintf(buf, sizeof(buf), "+%d'", r->del[i]);
+      k_text(ctx, buf, s_f18b, GRect(xt + k_breite(zeit, s_f24b) + 3, yy + 4, 40, 24), GTextAlignmentLeft, K_ORANGE);
+    }
+    sig_kasten(ctx, kasten, 10, yy + 14);
+    sig_minuten(ctx, r->los[i], now, yy, true);
+    if (k > 0 && k < MAXD - 1) k_flaeche(ctx, GRect(10, yy + SIG_DY - 2, 180, 1), K_GRAU);
+    s_pal = alt;
+    s_lauf_x0 = 0; s_lauf_x1 = 200;
+  }
+}
+static void sig_anzeige(GContext *ctx) {
+  const time_t now = time(NULL);
+  k_flaeche(ctx, GRect(0, 0, 200, 228), K_PAPIER);
+  if (s_rubrik == 1 && zeigt_route()) sig_route(ctx, aktuelle_route(), now);
+  else if (s_rubrik != 1 && zeigt_seite()) sig_seite(ctx, aktuelle(), now);
+  else {
+    sig_kopf(ctx, s_rubrik == 1 ? "Strecken" : "Abfahrten", "");
+    if ((s_rubrik == 1 ? s_ranzahl : s_anzahl) == 0) {
+      k_text(ctx, s_rubrik == 1 ? "Keine Strecken" : "Keine Abfahrten", s_f24b, GRect(0, 74, 200, 30), GTextAlignmentCenter, K_TINTE);
+      graphics_context_set_text_color(ctx, K_DUNKEL);
+      graphics_draw_text(ctx, "Select lang öffnet das Menü: Neu anlegen", s_f18, GRect(16, 108, 168, 50),
+                         GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
+    }
+  }
+  k_anzeige_fuss(ctx);
+  k_rubrik(ctx);
+}
+// Fahrtkarte in Signal: links ein Ring, der sich bis zum Ziel des Countdowns füllt, darin die Zahl; rechts wie in
+// Papier oben rechts (nächster Halt bzw. Fußweg) und die Zeile darunter; dann Name groß und die Zeilen vom Handy.
+static int32_t s_ring_ziel, s_ring_dauer;            // Ring: Countdown-Ziel und Dauer ab dem ersten Bild dazu
+static void sig_karte(GContext *ctx) {
+  char zahl[8], buf[48];
+  const char *einheit;
+  bool warn;
+  const time_t now = time(NULL);
+  k_flaeche(ctx, GRect(0, 0, 200, 228), K_PAPIER);
+  k_kopf(ctx, s_k->kopf, K_PAPIER);
+  if (s_k->zeit != s_ring_ziel) { s_ring_ziel = s_k->zeit; s_ring_dauer = s_k->zeit - now > 60 ? s_k->zeit - now : 60; }
+  int32_t anteil = 0;                                   // 0 .. TRIG_MAX_ANGLE
+  if (s_ring_ziel && s_ring_dauer > 0) {
+    const int32_t rest = s_ring_ziel - now > 0 ? s_ring_ziel - now : 0;
+    anteil = (int32_t)((int64_t)TRIG_MAX_ANGLE * (s_ring_dauer - (rest < s_ring_dauer ? rest : s_ring_dauer)) / s_ring_dauer);
+  }
+  // rechts: oben r1, darunter r2 (nächster Halt bzw. Fußweg), dann die Zeile unter der Zahl. Lauftexte zuerst: sie
+  // übermalen links ihre Zeile bis zum Rand, der Ring kommt danach darüber (sonst Balken durch den Ring bzw. Text im
+  // Ring, gefunden von Seb 2026-10-13)
+  if (s_k->r2[0]) lauf_k(ctx, s_k->r2, s_rf_font(!s_k->rf), GRect(96, 52, 98, 24), s_k->rf ? K_DUNKEL : K_TINTE, K_PAPIER, 56, 18);
+  if (s_k->r1[0]) k_text(ctx, s_k->r1, s_rf_font(s_k->rf), GRect(96, 32, 98, 24), GTextAlignmentLeft, s_k->rf ? K_TINTE : K_DUNKEL);
+  karte_unter(buf, sizeof(buf));
+  lauf_k(ctx, buf, s_f14b, GRect(96, 78, 98, 18), K_DUNKEL, K_PAPIER, 80, 16);
+  karte_zahl(zahl, sizeof(zahl), &einheit, &warn);
+  const GRect ring = GRect(8, 32, 80, 80);
+  graphics_context_set_fill_color(ctx, K_GRAU);
+  graphics_fill_radial(ctx, ring, GOvalScaleModeFitCircle, 8, 0, TRIG_MAX_ANGLE);
+  if (anteil > 0) {
+    graphics_context_set_fill_color(ctx, warn ? K_ROT : SIG_AKZENT);
+    graphics_fill_radial(ctx, ring, GOvalScaleModeFitCircle, 8, 0, anteil);
+  }
+  k_text(ctx, zahl, s_f_uhr, GRect(8, 44, 80, 40), GTextAlignmentCenter, warn ? K_ROT : K_TINTE);
+  k_text(ctx, einheit, s_f14b, GRect(8, 78, 80, 18), GTextAlignmentCenter, K_DUNKEL);
+  k_text(ctx, s_k->label, s_f14b, GRect(6, 114, 140, 18), GTextAlignmentLeft, K_DUNKEL);
+  const int nr = s_k->steig[0] ? 196 - k_steig_w(s_k->steig) - 4 : 194;
+  lauf_k(ctx, s_k->name, k_breite(s_k->name, s_f24b) <= nr - 6 ? s_f24b : s_f18b, GRect(6, 125, nr - 6, 30), K_TINTE, K_PAPIER, 131, 24);
+  if (s_k->steig[0]) k_steig_box(ctx, s_k->steig, 132);
+  int y = 160;
+  for (int i = 0; i < KZ; i++) {
+    const uint8_t f = s_k->f[i];
+    if (!(f & 128)) continue;
+    if (f & 8) { k_flaeche(ctx, GRect(6, y, 188, 1), K_GRAU); y += 3; }
+    if (y > 192) break;
+    const GColor wc = (f & 16) ? K_ROT : (f & 32) ? K_DUNKEL : K_TINTE;
+    const GFont wf = (f & 64) ? s_f18b : s_f18;
+    if (f & 4) { lauf_k(ctx, s_k->w[i], (f & 16) ? s_f18b : wf, GRect(6, y - 3, 188, 24), wc, K_PAPIER, y + 1, 16); y += 17; continue; }
+    int rand = 194, rw = 0;
+    if (s_k->s[i][0]) rand = 196 - k_steig_w(s_k->s[i]) - 4;
+    else if (s_k->r[i][0]) { rw = k_breite(s_k->r[i], s_f18b); rand = 194 - rw - 6; }
+    lauf_k(ctx, s_k->w[i], wf, GRect(44, y - 3, rand - 44, 24), wc, K_PAPIER, y + 1, 16);
+    k_text(ctx, s_k->l[i], s_f14b, GRect(6, y, 40, 18), GTextAlignmentLeft, K_DUNKEL);
+    if (s_k->s[i][0]) k_steig_box(ctx, s_k->s[i], y);
+    else if (rw) k_text(ctx, s_k->r[i], s_f18b, GRect(194 - rw, y - 3, rw + 2, 24), GTextAlignmentRight, (f & 1) ? K_ROT : K_TINTE);
+    y += 17;
+  }
+  k_fuss(ctx, s_k->fuss, false, K_TINTE, s_dstand);
+}
+
 static void lauf_cb(void *data);
 static void zeichnen(Layer *layer, GContext *ctx) {
   s_lauf_bedarf = false;                               // die Seiten melden beim Zeichnen, ob ein Text laufen muss
-  if (s_layout == LAYOUT_PAPIER) {
-    if (s_modus == M_ANZEIGE) k_anzeige(ctx); else if (s_modus == M_DETAIL) { if (karte_zeigen()) k_karte(ctx); else k_detail(ctx); }
+  if (KLAR_ART) {
+    if (s_modus == M_ANZEIGE) { if (SIGNAL) sig_anzeige(ctx); else k_anzeige(ctx); }
+    else if (s_modus == M_DETAIL) { if (karte_zeigen()) { if (SIGNAL) sig_karte(ctx); else k_karte(ctx); } else k_detail(ctx); }
     else if (s_modus == M_SUCHE) k_suche(ctx); else if (s_modus == M_FRAGE) k_frage(ctx); else k_liste(ctx);
   } else {
     if (s_modus == M_ANZEIGE) p_anzeige(ctx); else if (s_modus == M_DETAIL) { if (karte_zeigen()) p_karte(ctx); else p_detail(ctx); }
@@ -1732,10 +1991,10 @@ static void anzeige_zeigen(void) {
 // Seite (bis 0.7.1 "HALTESTELLE 3 >") ist aufgelöst. Einträge, die nicht passen, fehlen; Einträge mit Gegenstand nennen
 // ihn ("FAVORIT: KURHAUS", "LOESCHEN: HBF > KURHAUS"). Zurück führt dorthin, wo das Menü geöffnet wurde.
 static void bit_name(char *buf, size_t n, const char *vor, const char *led, const char *klar) {
-  snprintf(buf, n, "%s%s", vor, s_layout == LAYOUT_PAPIER && klar[0] ? klar : led);
+  snprintf(buf, n, "%s%s", vor, KLAR_ART && klar[0] ? klar : led);
 }
 static void seiten_name(char *buf, size_t n) {          // "HBF > KURHAUS" bzw. "HBF" (Abfahrten), "> KURHAUS" (Strecke ab Standort)
-  const bool k = s_layout == LAYOUT_PAPIER;
+  const bool k = KLAR_ART;
   if (s_rubrik == 1) {
     const Route *r = aktuelle_route();
     const char *nach = k && r->klar[0] ? r->klar : r->name, *von = k && r->vonk[0] ? r->vonk : r->von;
@@ -1876,7 +2135,7 @@ static void einstellungen_zeigen(int sel) {
 // sel = Aktion des Eintrags, auf dem die Auswahl stehen soll (Hoher Kontrast fehlt in Papier, das hat nie Grau).
 static void anzeigemenue_zeigen(int sel) {
   liste_beginnen(L_ANZEIGE, T("ANZEIGE", "Anzeige"));
-  eintrag(T("ANSICHT: PHOSPHOR", "Ansicht: Papier"), A_ANSICHT);
+  eintrag(T("ANSICHT: PHOSPHOR", SIGNAL ? "Ansicht: Signal" : "Ansicht: Papier"), A_ANSICHT);
   eintrag(s_invers ? T("INVERTIERT: AN", "Invertiert: an") : T("INVERTIERT: AUS", "Invertiert: aus"), A_INVERS_UM);
   if (s_layout == LAYOUT_PHOSPHOR) eintrag(s_kontrast ? "HOHER KONTRAST: AN" : "HOHER KONTRAST: AUS", A_KONTRAST_UM);
   eintrag(s_abfahrt == ABF_AKTUELL ? T("ABFAHRT: AKTUELL", "Abfahrt: aktuell") : T("ABFAHRT: FAHRPLAN", "Abfahrt: Fahrplan"), A_ABF_UM);
@@ -1950,7 +2209,8 @@ static void ansicht_zeigen(void) {                     // Auswahl der Ansicht, d
   liste_beginnen(L_ANSICHT, T("ANSICHT", "Ansicht"));
   eintrag(T("PAPIER", "Papier"), A_SET_PAPIER);
   eintrag(T("PHOSPHOR", "Phosphor"), A_SET_PWEISS);
-  liste_fertig(s_layout == LAYOUT_PHOSPHOR ? 1 : 0);
+  eintrag(T("SIGNAL", "Signal"), A_SET_SIGNAL);
+  liste_fertig(s_layout == LAYOUT_PHOSPHOR ? 1 : SIGNAL ? 2 : 0);
 }
 
 static void aktion_senden(int aktion, int wahl) {      // mit Antwort vom Handy: LADE zeigen
@@ -1960,7 +2220,7 @@ static void aktion_senden(int aktion, int wahl) {      // mit Antwort vom Handy:
 
 static void layout_setzen(int v) {
   const int b = v & 7;
-  s_layout = (b == 2 || b == 4) ? LAYOUT_PHOSPHOR : LAYOUT_PAPIER;   // Phosphor grün -> weiß; LED, Klar -> Papier (0.13.0)
+  s_layout = (b == 2 || b == 4) ? LAYOUT_PHOSPHOR : b == 6 ? LAYOUT_SIGNAL : LAYOUT_PAPIER;   // Phosphor grün -> weiß; LED, Klar -> Papier (0.13.0)
   s_invers = b != 0 && b != 3 && (v & LW_INVERS);      // LED invertiert war dunkel auf hell, also Klar normal
   s_kontrast = (v & LW_KONTRAST) != 0;
   s_schliessen = (v & LW_SCHLIESSEN) != 0;
@@ -2308,6 +2568,7 @@ static void liste_waehlen(void) {
     case A_ANSICHT: ansicht_zeigen(); break;
     case A_SET_PWEISS: layout_waehlen(4); break;
     case A_SET_PAPIER: layout_waehlen(5); break;
+    case A_SET_SIGNAL: layout_waehlen(6); break;
     case A_INVERS_UM: farbe_umschalten(LW_INVERS, A_INVERS_UM); break;
     case A_KONTRAST_UM: farbe_umschalten(LW_KONTRAST, A_KONTRAST_UM); break;
     case A_SCHLIESSEN_UM: farbe_umschalten(LW_SCHLIESSEN, A_SCHLIESSEN_UM); break;
@@ -2707,7 +2968,8 @@ static int16_t s_tx0, s_ty0, s_tx, s_ty;
 static bool s_tan;
 static int block_bei(int y) {                          // Nummer der Abfahrt bzw. Verbindung unter dem Finger, -1 = keine
   int y0, dy;
-  if (s_rubrik == 1) { y0 = s_layout == LAYOUT_PAPIER ? 92 : 101; dy = s_layout == LAYOUT_PAPIER ? 39 : 38; }
+  if (SIGNAL) { y0 = SIG_Y0; dy = SIG_DY; }
+  else if (s_rubrik == 1) { y0 = s_layout == LAYOUT_PAPIER ? 92 : 101; dy = s_layout == LAYOUT_PAPIER ? 39 : 38; }
   else {
     const bool ziel = hat_ziel(aktuelle());
     if (s_layout == LAYOUT_PAPIER) { y0 = ziel ? 92 : 72; dy = ziel ? 39 : 45; }
@@ -2728,7 +2990,7 @@ static void antippen(int x, int y) {
     n = s_rubrik == 1 ? route_naechste(aktuelle_route(), time(NULL), idx) : naechste(aktuelle(), time(NULL), idx);
     detail_oeffnen(k >= 0 && k < n ? idx[k] : 0);
   } else if (s_modus == M_LISTE) {
-    const int k = (y - (s_layout == LAYOUT_PAPIER ? K_Y0 : P_Y0) - liste_versatz()) / K_ZEILE;
+    const int k = (y - (KLAR_ART ? K_Y0 : P_Y0) - liste_versatz()) / K_ZEILE;
     if (k >= 0 && k < LZEILEN && s_loben + k < s_lanz) { s_lsel = s_loben + k; liste_waehlen(); }
   } else if (s_modus == M_SUCHE) rad_waehlen();
 }

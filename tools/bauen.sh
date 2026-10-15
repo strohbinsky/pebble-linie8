@@ -31,6 +31,13 @@ rsync -a --delete --exclude build --exclude tools --exclude dist --exclude docs 
 cd "$ZIEL"
 rm -rf build   # pebble clean reicht nicht: rsync --delete entfernt die waf-Statusdatei, dann bleibt build/ veraltet
 pebble build 2>&1 | grep -v "PebblePacket\|Represents" | tail -3
+# Die Pipe verdeckt einen Compilerfehler (Status von tail): ohne .pbw abbrechen und die Fehler zeigen, sonst meldet
+# die Sperre unten einen falschen Fund auf dem leeren Muster build/*.pbw (2026-10-13)
+if ! ls build/*.pbw >/dev/null 2>&1; then
+  echo "ABBRUCH: Bau fehlgeschlagen"
+  pebble build 2>&1 | grep -E "error" | head -20
+  exit 1
+fi
 if [ -s "$SCHLUESSEL" ] && unzip -p build/*.pbw | grep -qaF -f "$SCHLUESSEL"; then
   echo "ABBRUCH: RMV-Schlüssel steckt in der gebauten App — nicht kopiert"
   exit 1

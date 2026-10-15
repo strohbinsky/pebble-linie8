@@ -429,9 +429,9 @@ function umkreisText(m) { return m >= 1000 ? (m / 1000) + T('KM', ' km') : m + T
 // und 'kontrast' (keine graue Schrift, nur Phosphor). Alte Werte: 'phosphor' (grün) wird Phosphor weiß; 'klar', 'led'
 // und 'invers' (LED invers als eigene Ansicht bis 0.9.0) werden Papier — LED-Stände dabei nicht invertiert.
 // Phosphor nutzt die Großbuchstaben-Texte ohne Umlaute, Papier die normale Schreibweise.
-var LAYOUTS = ['led', 'klar', 'phosphor', 'invers', 'phosphor_weiss', 'papier'];   // Index = Wert in LAYOUT; gesendet nur noch 4 und 5
+var LAYOUTS = ['led', 'klar', 'phosphor', 'invers', 'phosphor_weiss', 'papier', 'signal'];   // Index = Wert in LAYOUT; gesendet nur noch 4, 5 und 6 (Signal seit 0.14.0)
 function altLed() { var v = localStorage.getItem('layout'); return v === 'led' || v === 'invers'; }
-function layout() { var v = localStorage.getItem('layout'); return v === 'phosphor' || v === 'phosphor_weiss' ? 'phosphor_weiss' : 'papier'; }
+function layout() { var v = localStorage.getItem('layout'); return v === 'phosphor' || v === 'phosphor_weiss' ? 'phosphor_weiss' : v === 'signal' ? 'signal' : 'papier'; }
 function invers() { return !altLed() && localStorage.getItem('invers') === '1'; }
 function kontrast() { return localStorage.getItem('kontrast') === '1'; }
 function schliessen() { return localStorage.getItem('schliessen') === '1'; }   // App nach 10 s ohne Taste zu (0.9.2, Standard aus)
@@ -439,12 +439,12 @@ function schliessen() { return localStorage.getItem('schliessen') === '1'; }   /
 function layoutWert() { return LAYOUTS.indexOf(layout()) | (invers() ? 8 : 0) | (kontrast() ? 16 : 0) | (schliessen() ? 32 : 0); }
 function layoutMerken(w) {
   var b = w & 7, led = b === 0 || b === 3;
-  localStorage.setItem('layout', b === 2 || b === 4 ? 'phosphor_weiss' : 'papier');
+  localStorage.setItem('layout', b === 2 || b === 4 ? 'phosphor_weiss' : b === 6 ? 'signal' : 'papier');
   localStorage.setItem('invers', !led && (w & 8) ? '1' : '0');
   localStorage.setItem('kontrast', w & 16 ? '1' : '0');
   localStorage.setItem('schliessen', w & 32 ? '1' : '0');
 }
-function T(led, klar) { return layout() === 'papier' ? klar : led; }   // Text je nach Ansicht
+function T(led, klar) { return layout() !== 'phosphor_weiss' ? klar : led; }   // Text je nach Ansicht
 
 // Quelle der Abfahrten (seit 0.35): 'auto' (Standard: RMV mit Schlüssel, bei Fehler Transitous), 'rmv' (nur RMV,
 // Fehler bleibt Fehler — auch ohne Schlüssel), 'trans' (nur Transitous). Einstellbar an Seite und Uhr.
