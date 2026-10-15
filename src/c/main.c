@@ -32,6 +32,12 @@
 // Fahrt, Karte, Kopf, gewählte Listenzeile. In der Fahrt steht ein Balken auf dem nächsten Halt (wie die Auswahl im Menü),
 // Strecken zeigen ihre Zwischenhalte. Menü der Seite: WEITERE FAHRTEN — frühere und spätere Abfahrten bzw. Verbindungen
 // als Liste, Select öffnet deren Details wie auf der Seite.
+//
+// 0.15.0 (Seb 2026-10-15): STARTSEITE (Schalter, Standard aus) — beim Öffnen die nächste Haltestelle wie ABFAHRTEN HIER,
+// Hoch = Abfahrten, Runter = Strecken, Zurück auf einer Seite = Startseite. EINSTELLUNGEN nach Rubriken, jede Einstellung
+// zweizeilig mit Werteliste; AKTUALISIEREN: regelmäßig, nach Abfahrt (sofort neu laden, sobald die oberste weg ist),
+// ohne Taste (ersetzt APP SCHLIESSEN und die feste Ladepause). In der Fahrt zählt die Uhr die Halte selbst weiter,
+// vorbei ab ihrer Abfahrt. Ansicht Signal entfernt, Zeiten als int32_t (keine 64-Bit-Division mehr).
 #include <pebble.h>
 #include "led_font.h"
 
@@ -192,6 +198,7 @@ static bool s_startseite;           // STARTSEITE (Standard aus): beim Öffnen d
 static bool s_start;                // die Startseite wird gezeigt (Platz HIER mit Nummer 0)
 static bool s_hier_start;           // ABFAHRTEN HIER kam von der Startseite: Zurück führt dorthin
 static int16_t s_hier_m;            // Entfernung zur Haltestelle von ABFAHRTEN HIER bzw. Startseite (m), 0 = unbekannt
+static bool s_hier0;                // Platz HIER hält die nächste Haltestelle (Nummer 0): Startseite kann ihn gleich zeigen
 static bool s_lzwei;                // Liste mit zwei Zeilen je Eintrag (Einstellungen: "NAME|Wert")
 static AppTimer *s_rubrik_timer;    // solange gesetzt: Name der Rubrik eingeblendet
 static AppTimer *s_lang_timer;      // Hoch/Runter wird gehalten
@@ -956,6 +963,10 @@ static void k_anzeige_fuss(GContext *ctx) {
   k_fuss(ctx, buf, buf[0] != '\0', farbe, (status == ST_SOLL || status == ST_LIVE) ? stand : 0);   // Stand rechts
 }
 
+static void meter_text(char *buf, size_t n, int m) {   // "120 m", ab 1 km "1,2 km" (Phosphor: "120M", "1.2KM")
+  if (m >= 1000) snprintf(buf, n, T("%d.%dKM", "%d,%d km"), m / 1000, (m % 1000) / 100);
+  else snprintf(buf, n, T("%dM", "%d m"), m);
+}
 static void k_anzeige(GContext *ctx) {
   const int32_t now = jetzt();
   char buf[48];
@@ -967,8 +978,14 @@ static void k_anzeige(GContext *ctx) {
   k_text(ctx, buf, s_f_uhr, GRect(64, 1, 130, 40), GTextAlignmentRight, K_PAPIER);   // 0.8.0: Uhrzeit rechts
   seitenzeichen(buf, sizeof(buf), false);                // Rubrik und Seite: "A2/5", "S1/3"
   k_text(ctx, buf, s_f14b, GRect(7, 1, 84, 18), GTextAlignmentLeft, K_LGRAU);
-  k_text(ctx, s_rubrik == 1 ? (s_sofort ? "Strecke ab hier" : "Strecken") : (s_hier ? "Abfahrten hier" : "Abfahrten"),
-         s_f14, GRect(7, 18, 100, 18), GTextAlignmentLeft, K_LGRAU);
+  const char *rub = s_rubrik == 1 ? (s_sofort ? "Strecke ab hier" : "Strecken") : (s_hier ? "Abfahrten hier" : "Abfahrten");
+  if (s_rubrik == 0 && s_hier && s_hier_m > 0) {       // Abfahrten hier: mit Entfernung zur Haltestelle (0.15.0)
+    char m[16];
+    meter_text(m, sizeof(m), s_hier_m);
+    snprintf(buf, sizeof(buf), "%s · %s", rub, m);
+    rub = buf;
+  }
+  k_text(ctx, rub, s_f14, GRect(7, 18, 110, 18), GTextAlignmentLeft, K_LGRAU);
 
   if (s_rubrik == 1) {
     if (zeigt_route()) k_route(ctx, aktuelle_route(), now);
@@ -999,10 +1016,6 @@ static void k_anzeige(GContext *ctx) {
 #define ST_DY 36
 #define ST_SCHILD1 30      // oberes und unteres Schild (y)
 #define ST_SCHILD2 178
-static void meter_text(char *buf, size_t n, int m) {   // "120 m", ab 1 km "1,2 km" (Phosphor: "120M", "1.2KM")
-  if (m >= 1000) snprintf(buf, n, T("%d.%dKM", "%d,%d km"), m / 1000, (m % 1000) / 100);
-  else snprintf(buf, n, T("%dM", "%d m"), m);
-}
 static void k_schild(GContext *ctx, int y, const char *t) {   // Schild mit Spitze zur Taste rechts, 24 px hoch
   const int w = k_breite(t, s_f18b) + 14;
   graphics_context_set_fill_color(ctx, K_TINTE);
@@ -1459,6 +1472,12 @@ static void p_anzeige(GContext *ctx) {
   const int ux = 196 - P_GW(buf, 4);                   // 0.8.0: Uhrzeit rechts, links daneben die Rubrik
   P_GROSS(buf, ux, 18, 4, P_TEXT);
   const char *rub = s_rubrik == 1 ? (s_sofort ? "AB HIER" : "STRECKEN") : (s_hier ? "HIER" : "ABFAHRTEN");
+  if (s_rubrik == 0 && s_hier && s_hier_m > 0) {       // mit Entfernung zur Haltestelle (0.15.0)
+    char mt[12];
+    meter_text(mt, sizeof(mt), s_hier_m);
+    snprintf(re, sizeof(re), "HIER %s", mt);
+    rub = re;
+  }
   p_text(ctx, F35, F35_N, F35_H, rub, 4, 26, 2, P_GRAU, 0, ux - 6);
   p_punktlinie(ctx, 51);
 
@@ -1861,8 +1880,10 @@ static void abschicken(int aktion, int wahl, const char *text) {
 static void aktion_abschicken(int aktion, int wahl) { abschicken(aktion, wahl, NULL); }
 
 // Gezeigte Seite (und offene Details) beim Handy anfordern. still: Statuszeile bleibt (automatisch jede Minute)
+static bool s_ab_faellig;          // NACH ABFAHRT: oberste Abfahrt weg, Seite noch nicht neu angefragt (bei ab_planen)
 static void anfordern_mit(bool still) {
   s_lade_t = jetzt();
+  s_ab_faellig = false;                                // jede Antwort bringt die Liste ohnehin neu (nur kommende, 0.15.0)
   if (s_fahrt && s_modus == M_DETAIL) { abschicken(A_REQUEST, 0, NULL); return; }
   if (s_rubrik == 0 && s_hier) abschicken(A_HIER, s_hier_nr, NULL);
   else if (s_rubrik == 1 && s_sofort) abschicken(A_SOFORT_NR, s_sofort_nr, NULL);
@@ -1901,6 +1922,7 @@ static bool laden_erlaubt(void) {                      // OHNE TASTE: 0 immer, s
 }
 // NACH ABFAHRT (0.15.0): Zeitgeber auf den Moment, in dem die oberste Abfahrt bzw. Verbindung aus der Liste fällt; dann
 // neu laden, am Handy am Puffer vorbei (bis 0.14.0 standen bis zum nächsten Laden nur zwei da). Gestellt beim Zeichnen.
+// Fährt sie ab, während Details oder Menü offen sind, lädt die Seite beim Zurückkommen (s_ab_faellig).
 static AppTimer *s_ab_timer;
 static int32_t s_ab_ziel;
 static int32_t oberste_weg(void) {
@@ -1912,10 +1934,14 @@ static int32_t oberste_weg(void) {
 }
 static void ab_cb(void *data) {
   s_ab_timer = NULL;
-  if (s_modus == M_ANZEIGE && seite_da() && laden_erlaubt()) anfordern_neu();
-  layer_mark_dirty(s_layer);                           // zeichnen() stellt den Zeitgeber auf die nächste
+  s_ab_faellig = true;
+  layer_mark_dirty(s_layer);                           // zeichnen() lädt (auf der Seite) und stellt den nächsten Zeitgeber
 }
-static void ab_planen(void) {
+static void ab_planen(void) {                          // nur auf der Seite (zeichnen, M_ANZEIGE)
+  if (s_ab_faellig) {
+    s_ab_faellig = false;
+    if (s_nachab && seite_da() && laden_erlaubt()) anfordern_neu();
+  }
   const int32_t t = s_nachab && seite_da() ? oberste_weg() : 0;
   if (t == s_ab_ziel && (s_ab_timer || !t)) return;
   if (s_ab_timer) { app_timer_cancel(s_ab_timer); s_ab_timer = NULL; }
@@ -2425,6 +2451,7 @@ static void hier_starten(void) {                       // Haltestellen: Platz HI
   s_start = false;
   s_rubrik = 0; s_hier = true; s_sofort = false;
   s_hier_nr = s_hier_n = s_hier_m = 0;
+  s_hier0 = false;
   anzeige_zeigen();
   anfordern();
 }
@@ -2458,7 +2485,7 @@ static void sofort_beenden(void) {
 static void rubrik_cb(void *data);
 static void start_zeigen(bool anfragen) {
   Strecke *s = &s_str[HIER];
-  if (!s_hier || s_hier_nr != 0 || !s->name[0][0]) {   // anderer Inhalt im Platz HIER: leeren, bis das Handy antwortet
+  if (!s_hier0 || !s->name[0][0]) {                   // anderer Inhalt im Platz HIER: leeren, bis das Handy antwortet
     memset(s, 0, sizeof(*s));
     strcpy(s->name[0], "STANDORT");
     strcpy(s->klar[0], "Standort ...");
@@ -2544,7 +2571,10 @@ static bool menue_empfangen(DictionaryIterator *it) {
     menue = true;
     const int n = t->value->int32;
     Tuple *ti = dict_find(it, MESSAGE_KEY_L_TITEL);
-    if (n == -2) anzeige_zeigen();                       // Ablauf beendet, gleich zur Anzeige (Favorit, Fahrt beendet)
+    if (n == -2) {                                       // Ablauf beendet, gleich zur Anzeige (Favorit, Fahrt beendet)
+      anzeige_zeigen();                                  // 0.15.0: und die Seite neu anfragen (Startseite nach der Fahrt leer)
+      if (seite_da()) anfordern_mit(!s_start || s_hier0);
+    }
     else if (n == -6) fahrt_oeffnen();                   // aktive Fahrt zeigen (gestartet, Frage beantwortet)
     else if (n == -7) detail_oeffnen(LISTE);             // in WEITERE FAHRTEN gewählt: deren Details (0.13.0)
     else if (n == -3) rad_starten(ti ? ti->value->cstring : "");
@@ -2941,6 +2971,7 @@ static void empfangen(DictionaryIterator *it, void *ctx) {
       if ((x = dict_find(it, MESSAGE_KEY_HIER_NR))) s_hier_nr = x->value->int32;
       if ((x = dict_find(it, MESSAGE_KEY_HIER_N))) s_hier_n = x->value->int32;
       s_hier_m = (x = dict_find(it, MESSAGE_KEY_HIER_M)) ? x->value->int32 : 0;
+      s_hier0 = s_hier_nr == 0;
       lauf_starten();
     }
     for (int j = 0; j < MAXD; j++) {
@@ -2984,6 +3015,7 @@ static void blaettern(int d) {                         // Hoch/Runter auf der Se
       s_hier_nr += d;
       if (s_hier_n > 0) s_hier_nr = (s_hier_nr + s_hier_n) % s_hier_n;
       memset(s_str[HIER].dep, 0, sizeof(s_str[HIER].dep));
+      s_hier0 = false;
       strcpy(s_str[HIER].name[0], "...");
       strcpy(s_str[HIER].klar[0], "...");
       anfordern();

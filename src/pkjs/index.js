@@ -1490,7 +1490,7 @@ function hierExtra(h, i, n, pos) {
   extra[keys.HIER_KLAR] = L.utf8Kuerzen(L.klarname(h.name, stadt), 31);
   extra[keys.HIER_NR] = i;
   extra[keys.HIER_N] = n;
-  extra[keys.HIER_M] = Math.round((pos ? L.entfernung(pos.lat, pos.lon, h.lat, h.lon) : h.m || 0) / 10) * 10;
+  extra[keys.HIER_M] = Math.max(10, Math.round((pos ? L.entfernung(pos.lat, pos.lon, h.lat, h.lon) : h.m || 0) / 10) * 10);   // 0 hieße unbekannt
   return extra;
 }
 // nachOrt(pos): Standort, sobald er da ist (Startseite: E1 für Hoch/Runter); gezeigt: Kennung der Haltestelle, deren

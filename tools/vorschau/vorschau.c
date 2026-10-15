@@ -61,14 +61,20 @@ int main(int argc, char **argv) {
   strcpy(s->name[1], argc > 19 ? argv[19] : "LUISENPLATZ");
   if (getenv("HIER")) {                        // HIER=10: „Abfahrten hier“, erste von 10 Haltestellen (0.51)
     s_str[HIER] = *s; s_hier = true; s_hier_nr = 0; s_hier_n = atoi(getenv("HIER"));
+    if (getenv("START")) s_start = true;       // START=1: Startseite (0.15.0), METER=120
+    if (getenv("METER")) s_hier_m = atoi(getenv("METER"));
   }
+  if (getenv("AKTU")) aktu_setzen(atoi(getenv("AKTU")));   // Startseite und Aktualisieren (0.15.0)
   layout_setzen(getenv("LAYOUT") ? atoi(getenv("LAYOUT")) : 2);   // seit 0.9.1 mit Farben: +8 invertiert, +16 hoher Kontrast, 4 Phosphor weiß
   if (getenv("ABFAHRT")) s_abfahrt = atoi(getenv("ABFAHRT"));   // 1 = aktuell (Zeit mit Verspätung)
   if (getenv("DAUERAUS")) s_dauer = false;                       // Fahrtdauer ausgeblendet
   const char *mod = getenv("MODUS");
   if (mod) {
     if (!strcmp(mod, "menue")) menue_zeigen();
-    else if (!strcmp(mod, "einst")) einstellungen_zeigen(getenv("SEL0") ? atoi(getenv("SEL0")) : 0);
+    else if (!strcmp(mod, "einst")) einstellungen_zeigen(getenv("SEL0") ? atoi(getenv("SEL0")) : L_ANZEIGE);   // SEL0: Liste L_… (0.15.0)
+    else if (!strcmp(mod, "rubrik")) rubrik_zeigen(getenv("RUB") ? atoi(getenv("RUB")) : L_ANZEIGE, getenv("SEL1") ? atoi(getenv("SEL1")) : -1);
+    else if (!strcmp(mod, "werte")) werte_zeigen(getenv("S") ? atoi(getenv("S")) : S_OHNE);
+    else if (!strcmp(mod, "zahl")) zahl_zeigen();
     else if (!strcmp(mod, "detail") || !strcmp(mod, "suche")) {}
     else {
       liste_beginnen(L_HANDY, getenv("TITEL") ? getenv("TITEL") : "");
@@ -145,6 +151,8 @@ int main(int argc, char **argv) {
       else if (!strcmp(k, "rf")) s_k->rf = atoi(v);
       else if (!strcmp(k, "jetzt")) FAKE_NOW = atol(v);
       else if (!strcmp(k, "akt")) s_dakt = atoi(v);
+      else if (k[0] == 'h' && k[1] == 't' && k[2] >= '0' && k[2] <= '2') s_k->ht[k[2] - '0'] = atol(v);   // 0.15.0
+      else if (k[0] == 'h' && k[1] == 'n' && k[2] >= '0' && k[2] <= '2') snprintf(s_k->hn[k[2] - '0'], sizeof s_k->hn[0], "%s", v);
       KS(kopf); KS(kopfr); KS(zeitl); KS(r1); KS(r2); KS(label); KS(name); KS(steig); KS(fuss);
       else if (k[0] == 'z' && k[1] >= '0' && k[1] <= '5') {
         const int i = k[1] - '0';
