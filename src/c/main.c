@@ -43,6 +43,7 @@
 // in AB_H Bit 2–3), Straße und Gleis bis zum Rand, die Haltestelle davor; Cartoon zeichnet alle 5 s neu.
 // Gleichlauf: die Front berührt den Mast genau, wenn die Uhr auf die Abfahrtsminute springt (Minutentakt zeichnet neu).
 // STARTSEITE und Ansicht Cartoon jetzt Standard.
+// 0.17.1: Cartoon färbt jede Abfahrt rosa, die an der Heimathaltestelle hält; die Auswahl zeigt ein Rahmen.
 // 0.16.0 (Seb 2026-10-16): Einstellungen „wählen und bleiben“ — jede Einstellung öffnet ihre Werteliste, Select übernimmt
 // sofort, die Liste bleibt offen (schon in der neuen Ansicht), ein Kreis rechts zeigt den aktuellen Wert. HEIMATHALTESTELLE
 // aus dem Menü einer Haltestelle: Abfahrten, die später dort halten, tragen ein volles Haus, die in ihrem Umkreis ein
@@ -2060,7 +2061,8 @@ static void cart_anzeige(GContext *ctx) {
     const int i = idx[k], y = C_Y0 + k * C_BH, v = s->del[i], dt = s->dep[i] - now, ry = y + 23;
     const bool aus = v == AUSFALL, gew = !gewaehlt && dt >= 0, zug = s->mi[i] == 2, gleis = zug || s->mi[i] == 1;
     gewaehlt = gewaehlt || gew;
-    const GColor bg = gew ? C_ROSA : aus ? C_HELL : C_HIMMEL;
+    const GColor bg = aus ? C_HELL : s->heim[i] == 2 ? C_ROSA : C_HIMMEL;   // 0.17.1: rosa = hält an der Heimat (alle, nicht nur die
+                                                     // oberste); die Auswahl trägt seitdem einen Rahmen
     k_flaeche(ctx, GRect(0, y, 200, C_BH), bg);
     if (!gew) k_flaeche(ctx, GRect(0, y + C_BH - 1, 200, 1), GColorWhite);
     if (aus) snprintf(re, sizeof(re), "fällt aus");
@@ -2072,7 +2074,8 @@ static void cart_anzeige(GContext *ctx) {
     snprintf(buf, sizeof(buf), "%s %s", s->lin[i], ziel ? k_name1(s) : s->endk[i]);
     lauf_k(ctx, buf, s_cf15, GRect(6 + hx, y + 1, 140 - rw - hx, 20), C_NAVY, bg, y + 1, 21);   // zuerst (Lauftext)
     if (hx) haus(ctx, 6, y + 7, s->heim[i], C_NAVY, bg);
-    k_text(ctx, re, s_cf15, GRect(148 - rw, y + 1, rw + 4, 20), GTextAlignmentRight, aus || v > 0 ? C_ORANGE : C_NAVY);
+    k_text(ctx, re, s_cf15, GRect(148 - rw, y + 1, rw + 4, 20), GTextAlignmentRight,   // auf Rosa dunkelrot statt orange (0.17.1)
+           aus || v > 0 ? (s->heim[i] == 2 && !aus ? GColorFromHEX(0xAA0000) : C_ORANGE) : C_NAVY);
     c_strasse(ctx, ry, gleis);
     const int bw = zug ? 72 : gleis ? 62 : 54, fx = C_STOP - (s->dep[i] / 60 * 60 - now) * C_STOP / 600;   // auf die volle Minute:
                                                      // die Front erreicht den Mast, wenn die Uhr auf die Abfahrtszeit springt
@@ -2085,6 +2088,12 @@ static void cart_anzeige(GContext *ctx) {
     c_zeit(zeit, sizeof(zeit), s->dep[i] - vz * 60);
     snprintf(st, sizeof(st), zug && s->steig[i][0] ? "Gl %s" : "%s", s->steig[i]);
     c_halt(ctx, y, st, zeit, aus ? C_STRASSE : v != vz ? C_ORANGE : C_NAVY, aus);
+    if (gew) {                                         // Auswahl: nachtblauer Rahmen um die Bahn
+      graphics_context_set_stroke_color(ctx, C_NAVY);
+      graphics_context_set_stroke_width(ctx, 3);
+      graphics_draw_round_rect(ctx, GRect(1, y + 1, 198, C_BH - 2), 4);
+      graphics_context_set_stroke_width(ctx, 1);
+    }
   }
   if (vt[0]) k_vorschlag(ctx, vt, C_Y0 + (MAXD - 1) * C_BH + 4);   // FRUEHER DA statt der dritten Bahn
   if (!n) k_text(ctx, s->status == ST_LADE ? "Lade …" : s->status == ST_STANDORT ? "Kein Standort" : "Keine Fahrt", s_cf18,
