@@ -38,6 +38,15 @@
 // zweizeilig mit Werteliste; AKTUALISIEREN: regelmäßig, nach Abfahrt (sofort neu laden, sobald die oberste weg ist),
 // ohne Taste (ersetzt APP SCHLIESSEN und die feste Ladepause). In der Fahrt zählt die Uhr die Halte selbst weiter,
 // vorbei ab ihrer Abfahrt. Ansicht Signal entfernt, Zeiten als int32_t (keine 64-Bit-Division mehr).
+//
+// 0.17.0 (Seb 2026-10-16): Cartoon zeigt das Verkehrsmittel (Bus auf der Straße, Tram und Zug auf dem Gleis, vom Handy
+// in AB_H Bit 2–3), Straße und Gleis bis zum Rand, die Haltestelle davor; Cartoon zeichnet alle 5 s neu.
+// Gleichlauf: die Front berührt den Mast genau, wenn die Uhr auf die Abfahrtsminute springt (Minutentakt zeichnet neu).
+// STARTSEITE und Ansicht Cartoon jetzt Standard.
+// 0.16.0 (Seb 2026-10-16): Einstellungen „wählen und bleiben“ — jede Einstellung öffnet ihre Werteliste, Select übernimmt
+// sofort, die Liste bleibt offen (schon in der neuen Ansicht), ein Kreis rechts zeigt den aktuellen Wert. HEIMATHALTESTELLE
+// aus dem Menü einer Haltestelle: Abfahrten, die später dort halten, tragen ein volles Haus, die in ihrem Umkreis ein
+// leeres. Dritte Ansicht Cartoon (Entwurf linie8-einfahrt-entwurf.png): je Abfahrt eine Straße, der Bus fährt ein.
 #include <pebble.h>
 #include "led_font.h"
 
@@ -82,7 +91,7 @@ enum { ST_LEER = -2, ST_LADE = -1, ST_SOLL = 0, ST_LIVE = 1, ST_NETZ = 2, ST_FEH
 enum { M_ANZEIGE, M_LISTE, M_LADE, M_DETAIL, M_SUCHE, M_FRAGE };   // was die Uhr gerade zeigt (M_FRAGE: Bestätigung, 0.8.0)
 // Woher die Liste stammt. Seit 0.15.0 EINSTELLUNGEN nach Rubriken: L_ANZEIGE bis L_DATEN zeigen je Einstellung zwei
 // Zeilen (Name, Wert), L_WERTE die Werteliste einer Einstellung, L_ZAHL die eigene Angabe (1–60 min)
-enum { L_HANDY, L_MENUE, L_EINST, L_DMENUE, L_ANZEIGE, L_AKTU, L_EABF, L_ESTR, L_SUCHE, L_DATEN, L_WERTE, L_ZAHL };
+enum { L_HANDY, L_MENUE, L_EINST, L_DMENUE, L_ANZEIGE, L_AKTU, L_EABF, L_ESTR, L_SUCHE, L_DATEN, L_WERTE, L_ZAHL, L_HEIM };
 enum { QUELLE_AUTO = 0, QUELLE_RMV = 1, QUELLE_TRANS = 2 };                     // wie QUELLEN in index.js
 enum { ABF_PLAN = 0, ABF_AKTUELL = 1 };                                          // Abfahrtszeit: Fahrplan oder mit Verspätung
 // Einstellungen (0.15.0), Reihenfolge wie in den Rubriken; Tabelle EINST bei den Menüs
@@ -92,8 +101,16 @@ enum { S_STARTSEITE, S_ANSICHT, S_INVERS, S_KONTRAST, S_ABFAHRT, S_DAUER, S_REGE
 // LED invers) werden beim Lesen umgesetzt: Phosphor grün -> Phosphor weiß, alles andere -> Papier.
 // Die dritte Ansicht Signal (LAYOUT 6, 0.14.0) ist seit 0.15.0 wieder entfernt (Seb 2026-10-15: noch Fehler, Platz für
 // Cartoon); gespeichertes Signal wird Papier. Code: dateien/signal-0.14.0-main.c, Zweig signal im Git-Repo.
-enum { LAYOUT_PAPIER = 1, LAYOUT_PHOSPHOR = 2 };
-#define KLAR_ART (s_layout != LAYOUT_PHOSPHOR)   // Papier: Systemschrift, Umlaute
+// 0.16.0: dritte Ansicht Cartoon (LAYOUT 7, Seb 2026-10-15/16), Farben und Schrift Fredoka wie Water im Timer.
+enum { LAYOUT_PAPIER = 1, LAYOUT_PHOSPHOR = 2, LAYOUT_CARTOON = 3 };
+#define KLAR_ART (s_layout != LAYOUT_PHOSPHOR)   // Papier und Cartoon: Systemschrift bzw. Fredoka, Umlaute
+#define CARTOON (s_layout == LAYOUT_CARTOON)
+#define C_NAVY    GColorFromHEX(0x000055)        // Cartoon: Schrift
+#define C_HIMMEL  GColorFromHEX(0xAAFFFF)        // Grund
+#define C_ROSA    GColorFromHEX(0xFF55AA)        // Auswahl, Kopf, Linienschild
+#define C_ORANGE  GColorFromHEX(0xFF5500)        // Verspätung, Ausfall
+#define C_STRASSE GColorFromHEX(0x555555)
+#define C_HELL    GColorFromHEX(0xAAAAAA)        // Straßenrand, ausgefallene Bahn
 // LAYOUT (Nachricht, Speicher) seit 0.9.1: Grundansicht (0 LED, 1 Klar, 2 Phosphor grün, 4 Phosphor weiß, 5 Papier,
 // 6 Signal; 3 = LED invers bis 0.9.0) + 8 invertiert + 16 hoher Kontrast; + 32 App schließen nur bis 0.14.0
 #define LW_INVERS 8
@@ -110,11 +127,13 @@ enum { A_NEU = 1, A_RUECKFAHRT = 2, A_AENDERN = 3, A_LOESCHEN = 4,       // AKTI
        A_R_ANKUNFT = 37,                                                       // 0.11.0
        A_FAHRTEN = 38,                                                         // 0.13.0: WEITERE FAHRTEN
        A_AKTU = 39,                                                            // 0.15.0: Startseite und Aktualisieren (AKTU)
+       A_HEIM = 40,                                                            // 0.16.0: Heimathaltestelle (Seite, -1 = löschen)
        // negative: nur auf der Uhr
        A_EINST = -1, A_HIER_START = -18, A_R_AENDERN = -28, A_FAHRT_ZEIGEN = -29,   // -30 NAECHSTE FAHRT bis 0.13.0
        A_ZU_ABF = -32, A_ZU_STR = -33, A_FAV_A = -34, A_FAV_B = -35, A_FRUEHER = -36,   // 0.8.0
        A_F_LOESCHEN = -37, A_F_BEENDEN = -38, A_F_ALLE_ABF = -39, A_F_ALLE_STR = -40,
-       A_RUB = -41, A_EINST_S = -42, A_WERT = -43 };   // 0.15.0: Rubrik, Einstellung, Wert (bis 0.14.0 je Wert eine Aktion)
+       A_RUB = -41, A_EINST_S = -42, A_WERT = -43,                     // 0.15.0: Rubrik, Einstellung, Wert (bis 0.14.0 je Wert eine Aktion)
+       A_HEIM_SEITE = -44, A_HEIM_E = -45, A_HEIM_WEG = -46 };         // 0.16.0: Heimathaltestelle im Menü, in den Einstellungen
 
 static Window *s_window;
 static Layer *s_layer;
@@ -132,6 +151,9 @@ typedef struct {
   int32_t stand;
   int status;
   char quelle[8];                   // "RMV" oder "TRANS" (Transitous), steht vor der Uhrzeit des Stands
+  uint8_t heim[MAXD];               // Heimathaltestelle (0.16.0): 2 = hält später dort, 1 = in ihrem Umkreis, 0 = nichts
+  uint8_t mi[MAXD];                 // Verkehrsmittel (0.17.0): 0 Bus, 1 Tram, 2 Zug, 3 Fähre
+  bool ist_heim;                    // die Haltestelle der Seite ist die Heimathaltestelle (Menüeintrag fehlt)
 } Strecke;
 
 #define HIER MAXS          // Platz für „Abfahrten hier“ hinter den Seiten, wie HIER in index.js
@@ -194,7 +216,7 @@ static int s_ohne = 5;              // OHNE TASTE (0.15.0): -1 nach 10 s schlie�
                                     // Minuten nicht mehr laden (ersetzt APP SCHLIESSEN und die feste Ladepause AKTIV_S)
 static int s_regel = 1;             // REGELMAESSIG: alle so viele Minuten neu laden, 0 = nur beim Öffnen
 static bool s_nachab = true;        // NACH ABFAHRT: neu laden, sobald die oberste Abfahrt bzw. Verbindung aus der Liste fällt
-static bool s_startseite;           // STARTSEITE (Standard aus): beim Öffnen die nächste Haltestelle
+static bool s_startseite = true;    // STARTSEITE (Standard an seit 0.17.0): beim Öffnen die nächste Haltestelle
 static bool s_start;                // die Startseite wird gezeigt (Platz HIER mit Nummer 0)
 static bool s_hier_start;           // ABFAHRTEN HIER kam von der Startseite: Zurück führt dorthin
 static int16_t s_hier_m;            // Entfernung zur Haltestelle von ABFAHRTEN HIER bzw. Startseite (m), 0 = unbekannt
@@ -241,6 +263,7 @@ static Karte *s_k;                  // Heap
 static bool s_karte;                // Karte zeigen (sonst der Verlauf)
 static int s_dakt = -1;             // markierte Detailzeile im Verlauf der Fahrt
 static char s_linfo[128];           // Info-Zeilen über einer Liste vom Handy, '|' getrennt (Vorschlag)
+static char s_heim[2][NAMELEN];     // Heimathaltestelle (0.16.0): Phosphor- und Papier-Schreibweise vom Handy, leer = keine
 static Strecke *aktuelle(void) { return &s_str[s_hier ? HIER : s_seite]; }
 static bool zeigt_seite(void) { return s_hier || s_anzahl > 0; }
 static Route *aktuelle_route(void) { return &s_rt[s_sofort ? HIER : s_rseite]; }
@@ -285,7 +308,7 @@ static char s_ftext[2 * NAMELEN + 16], s_fkopf[LTXT];   // Frage: ganzer Name (L
 static int s_faktion, s_fwahl;
 static int32_t s_hfav, s_rfav, s_sfav;   // Bits: Ort ist schon Favorit (Seite i: 2i Start, 2i+1 Ziel; Sofort: 0 Halt, 1 Ziel)
 static int32_t s_dstand;            // Stand der Details bzw. der Fahrt (UTC), 0 = unbekannt
-static int s_layout = LAYOUT_PAPIER;          // Papier (Standard seit 0.13.0): Systemschrift fett, kein Grau, Ziffern in Roboto Bold
+static int s_layout = LAYOUT_CARTOON;         // Cartoon (Standard seit 0.17.0, vorher Papier): Systemschrift fett, kein Grau, Ziffern in Roboto Bold
 static bool s_invers, s_kontrast;             // Farben invertiert; hoher Kontrast (keine graue Schrift, wirkt in Phosphor)
 typedef struct { GColor k_papier, k_tinte, k_rot, k_orange, k_grau, k_dunkel, k_lgrau,
                  p_hg, p_text, p_grau, p_gitter, p_schwach, p_hell, p_cyan, p_warn; } Palette;
@@ -293,11 +316,24 @@ static Palette s_pal;
 static GColor hex(uint32_t v) { return GColorFromHEX(v); }
 static GFont s_f_uhr, s_f14, s_f14b, s_f18, s_f18b, s_f24b, s_f28b;
 static GFont s_roboto32;
+static GFont s_cf12, s_cf15, s_cf18, s_cf22;   // Cartoon: Fredoka 12/15/18 halbfett, 22 fett — erst bei Bedarf geladen
 static void schriften_setzen(void) {           // Papier: fette Systemschrift, Ziffern aus Roboto (erst bei Bedarf geladen)
+  if (CARTOON) {                               // Cartoon (0.16.0): alles in Fredoka, der Aufbau von Papier bleibt
+    if (!s_cf12) {
+      s_cf12 = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FREDOKA_12));
+      s_cf15 = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FREDOKA_15));
+      s_cf18 = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FREDOKA_18));
+      s_cf22 = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FREDOKA_BOLD_22));
+    }
+    s_f14 = s_f14b = s_cf15; s_f18 = s_f18b = s_cf18; s_f24b = s_f28b = s_f_uhr = s_cf22;
+    return;
+  }
   if (KLAR_ART && !s_roboto32) s_roboto32 = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_ROBOTO_BOLD_32));
   s_f_uhr = s_roboto32;
-  s_f14 = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
-  s_f18 = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  s_f14 = s_f14b = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+  s_f18 = s_f18b = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+  s_f24b = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+  s_f28b = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
 }
 static void farben_setzen(void) {              // setzt auch die Schriften, die hängen an der Ansicht
   schriften_setzen();
@@ -320,25 +356,37 @@ static void farben_setzen(void) {              // setzt auch die Schriften, die 
   s_pal.k_grau = s_pal.k_dunkel = s_pal.k_tinte;
   s_pal.k_lgrau = s_pal.k_papier;
   if (s_kontrast) s_pal.p_grau = s_pal.p_hell = s_pal.p_schwach = s_pal.p_text;
+  if (CARTOON) {                                       // Cartoon (0.16.0): Himmel, Nachtblau, Rosa; Invertiert gilt hier nicht
+    s_pal.k_papier = C_HIMMEL;
+    s_pal.k_tinte = s_pal.k_grau = C_NAVY;
+    s_pal.k_dunkel = GColorFromHEX(0x0055AA);
+    s_pal.k_rot = C_ROSA;
+    s_pal.k_orange = C_ORANGE;
+    s_pal.k_lgrau = GColorFromHEX(0x55AAAA);
+  }
 }
 // Balken (0.13.0): eine Zeile wie die gewählte Menüzeile — Grund in Schriftfarbe, alles darin in der Grundfarbe.
 // In der Fahrt steht er auf dem nächsten Halt bzw. dem aktuellen Schritt. Danach mit der gemerkten Palette zurück.
 static Palette pal_balken(void) {
   const Palette alt = s_pal;
-  s_pal.k_papier = alt.k_tinte;
-  s_pal.k_tinte = s_pal.k_grau = s_pal.k_dunkel = s_pal.k_rot = alt.k_papier;
+  s_pal.k_papier = CARTOON ? alt.k_rot : alt.k_tinte;  // Cartoon: rosa Balken, Schrift nachtblau (0.16.0)
+  s_pal.k_tinte = s_pal.k_grau = s_pal.k_dunkel = s_pal.k_rot = CARTOON ? alt.k_tinte : alt.k_papier;
   s_pal.p_hg = alt.p_text;
   s_pal.p_text = s_pal.p_grau = s_pal.p_hell = s_pal.p_schwach = s_pal.p_gitter = alt.p_hg;
   return alt;
 }
 static int layout_wert(void) {
-  return (s_layout == LAYOUT_PHOSPHOR ? 4 : 5) | (s_invers ? LW_INVERS : 0) | (s_kontrast ? LW_KONTRAST : 0);
+  return (s_layout == LAYOUT_PHOSPHOR ? 4 : CARTOON ? 7 : 5) | (s_invers ? LW_INVERS : 0) | (s_kontrast ? LW_KONTRAST : 0);
 }
 static int s_umkreis = 1000;      // Meter; das Handy führt den Wert, die Uhr zeigt und ändert ihn
 static int s_quelle = QUELLE_AUTO; // Quelle der Abfahrten; das Handy führt den Wert, wie beim Umkreis
 static int s_abfahrt = ABF_PLAN;   // vorne die Fahrplanzeit (Standard) oder die aktuelle mit Verspätung
 static bool s_dauer = true;        // Fahrtdauer zum Ziel zeigen (Standard an)
-#define T(led, klar) (KLAR_ART ? (klar) : (led))   // Menütexte je Ansicht
+// Menütexte je Ansicht. Seit 0.16.0 ein Literal "PHOSPHOR\0Papier", tx() wählt den Teil: halb so viel Code wie der
+// Vergleich an jeder der gut 100 Stellen (das Abbild darf höchstens 64 KB groß sein). TV für Texte aus Variablen
+__attribute__((noinline)) static const char *tx(const char *s) { return KLAR_ART ? s + strlen(s) + 1 : s; }
+#define T(led, klar) tx(led "\0" klar)
+#define TV(led, klar) (KLAR_ART ? (klar) : (led))
 static int s_lanz, s_lsel, s_loben;
 static char s_ladetext[LTXT];
 static AppTimer *s_ladetimer;
@@ -607,6 +655,8 @@ static int umbruch_teil(const char *p, int maxw, int (*breite)(const char *)) {
 #define K_DUNKEL s_pal.k_dunkel
 #define K_LGRAU  s_pal.k_lgrau    // Grau auf Kopf- und Fußleiste
 #define K_LORANGE GColorFromHEX(0xFF5500)   // Orange auf der Leiste: dunkel genug für die weiße Leiste (invertiert)
+#define K_BALKEN  (CARTOON ? K_ROT : K_TINTE)    // gewählte Zeile: Papier Tinte, Cartoon rosa mit Nachtblau (0.16.0)
+#define K_BALKENT (CARTOON ? K_TINTE : K_PAPIER)
 #define K_ZEILE  22        // Listen: Zeilenhöhe in px
 #define K_Y0     28        // Listen: erste Zeile unter dem Titelbalken
 #define K_ZEILE2 40        // Einstellungen: zwei Zeilen je Eintrag (0.15.0); Phosphor P_ZEILE2
@@ -615,18 +665,40 @@ static int l_zeilen(void) { return !s_lzwei ? LZEILEN : KLAR_ART ? 4 : 6; }     
 static bool trenner(int i) { return !strncmp(s_ltext[i], "-- ", 3); }   // Zwischenüberschrift bzw. Erklärzeile
 static int l_hoehe(void) { return s_lzwei ? (KLAR_ART ? K_ZEILE2 : P_ZEILE2) : K_ZEILE; }   // P_ZEILE = K_ZEILE
 
-static void k_text(GContext *ctx, const char *t, GFont f, GRect r, GTextAlignment a, GColor c) {
+// noinline (0.16.0): über 150 Aufrufe, als eigene Funktion gut 1 KB kleiner — das Abbild darf höchstens 64 KB groß sein
+__attribute__((noinline)) static void k_text(GContext *ctx, const char *t, GFont f, GRect r, GTextAlignment a, GColor c) {
   graphics_context_set_text_color(ctx, c);
   graphics_draw_text(ctx, t, f, r, GTextOverflowModeTrailingEllipsis, a, NULL);
 }
 
-static int k_breite(const char *t, GFont f) {
+__attribute__((noinline)) static int k_breite(const char *t, GFont f) {
   return graphics_text_layout_get_content_size(t, f, GRect(0, 0, 1000, 40), GTextOverflowModeFill, GTextAlignmentLeft).w;
 }
 
-static void k_flaeche(GContext *ctx, GRect r, GColor c) {
+__attribute__((noinline)) static void k_flaeche(GContext *ctx, GRect r, GColor c) {
   graphics_context_set_fill_color(ctx, c);
   graphics_fill_rect(ctx, r, 0, GCornerNone);
+}
+
+// Heimathaltestelle (0.16.0): Haus 11 x 10 px vor dem Endziel. art 2 = die Fahrt hält später an der Heimathaltestelle
+// (voll, mit Tür), 1 = in deren Umkreis (nur Umriss, „nicht so deutlich“ — Wunsch Seb 2026-10-16). bg: Grund für die Tür
+static void haus(GContext *ctx, int x, int y, int art, GColor c, GColor bg) {
+  graphics_context_set_stroke_color(ctx, c);
+  for (int i = 0; i < 5; i++) {                        // Dach, unten so breit wie das Haus
+    if (art == 2) graphics_draw_line(ctx, GPoint(x + 5 - i, y + i), GPoint(x + 5 + i, y + i));
+    else { graphics_draw_pixel(ctx, GPoint(x + 5 - i, y + i)); graphics_draw_pixel(ctx, GPoint(x + 5 + i, y + i)); }
+  }
+  if (art != 2) { graphics_draw_rect(ctx, GRect(x + 1, y + 5, 9, 5)); return; }
+  k_flaeche(ctx, GRect(x + 1, y + 5, 9, 5), c);
+  k_flaeche(ctx, GRect(x + 4, y + 7, 3, 3), bg);
+}
+// Auswahlkreis rechts in Wertelisten (0.16.0): voll = aktueller Wert. Select übernimmt, die Liste bleibt offen
+static void l_kreis(GContext *ctx, int x, int y, int voll, GColor c) {
+  graphics_context_set_stroke_color(ctx, c);
+  graphics_context_set_stroke_width(ctx, 2);
+  graphics_draw_circle(ctx, GPoint(x, y), 6);
+  graphics_context_set_stroke_width(ctx, 1);
+  if (voll) { graphics_context_set_fill_color(ctx, c); graphics_fill_circle(ctx, GPoint(x, y), 3); }
 }
 
 // Papier: Text t im Rahmen r; zu lang -> läuft (Regel oben). Systemschrift lässt sich nicht beschneiden: links und
@@ -643,8 +715,41 @@ static void lauf_k(GContext *ctx, const char *t, GFont f, GRect r, GColor c, GCo
   k_flaeche(ctx, GRect(x1, zy, 200 - x1, zh), bg);
 }
 
+// Cartoon (0.16.0): Pille aus Rechteck und zwei Kreisen (Ecken von graphics_fill_rect höchstens 8 px), Rasen als Fuß,
+// Kopf mit dem Titel in einer rosa Pille und der Uhrzeit rechts — wie Water im Timer
+static void c_pille(GContext *ctx, int x, int y, int w, int h, GColor c) {
+  const int r = h / 2;
+  k_flaeche(ctx, GRect(x + r, y, w - 2 * r, h), c);
+  graphics_fill_circle(ctx, GPoint(x + r, y + r), r);
+  graphics_fill_circle(ctx, GPoint(x + w - 1 - r, y + r), r);
+}
+static void c_rasen(GContext *ctx, int y, const char *links, GColor lc, const char *rechts) {
+  k_flaeche(ctx, GRect(0, y, 200, 228 - y), GColorFromHEX(0xAAFFAA));
+  k_flaeche(ctx, GRect(0, y, 200, 2), GColorFromHEX(0x55AA55));
+  const int b = y + (228 - y) / 2 - 7, rw = rechts[0] ? k_breite(rechts, s_cf15) : 0;   // Fredoka 15, Grundlinie mittig
+  k_text(ctx, links, s_cf15, GRect(6, b, 186 - rw, 20), GTextAlignmentLeft, lc);
+  if (rw) k_text(ctx, rechts, s_cf15, GRect(190 - rw, b, rw + 4, 20), GTextAlignmentRight, C_NAVY);
+}
+static void c_kopf(GContext *ctx, const char *titel) {
+  char uhr[8];
+  uhr_text(uhr, sizeof(uhr));
+  const int uw = k_breite(uhr, s_cf18);
+  int tw = k_breite(titel, s_cf15);
+  if (tw > 164 - uw) tw = 164 - uw;
+  k_flaeche(ctx, GRect(0, 0, 200, 28), C_HIMMEL);
+  c_pille(ctx, 4, 3, tw + 20, 21, C_ROSA);
+  k_text(ctx, titel, s_cf15, GRect(14, 3, tw + 2, 20), GTextAlignmentLeft, C_NAVY);   // Grundlinie 18
+  k_text(ctx, uhr, s_cf18, GRect(192 - uw, 1, uw + 4, 24), GTextAlignmentRight, C_NAVY);
+}
+
 // Fußbalken: links Text (optional mit farbigem Punkt), rechts der Stand (grau, ab 2 min orange). Seit 0.8.0 ohne Uhr.
 static void k_fuss(GContext *ctx, const char *links, bool punkt, GColor farbe, int32_t stand) {
+  if (CARTOON) {                                       // Cartoon: Rasen, Stand rechts (alt: Text links orange)
+    char st[16];
+    stand_text(st, sizeof(st), stand, true);
+    c_rasen(ctx, 204, links, stand_alt(stand) ? C_ORANGE : C_NAVY, st);
+    return;
+  }
   const GColor schrift = K_PAPIER;
   k_flaeche(ctx, GRect(0, 210, 200, 18), K_TINTE);
   int x = 6;
@@ -663,6 +768,7 @@ static void k_fuss(GContext *ctx, const char *links, bool punkt, GColor farbe, i
 }
 // Kopfbalken (0.8.0): links der Titel, rechts die Uhrzeit fett
 static void k_kopf(GContext *ctx, const char *titel, GColor farbe) {
+  if (CARTOON) { c_kopf(ctx, titel); return; }
   char uhr[8];
   uhr_text(uhr, sizeof(uhr));
   const int uw = k_breite(uhr, s_f18b) + 8;
@@ -712,8 +818,10 @@ static void k_seite(GContext *ctx, const Strecke *s, int32_t now) {
     int bw = k_breite(lin, s_f24b) + 12;
     if (bw < 32) bw = 32;
     const int xt = 8 + bw + 6;
+    const int hx = !ziel && s->heim[i] ? 15 : 0;                       // Heimathaltestelle: Haus vor dem Endziel (0.16.0)
     if (!ziel && s->endk[i][0])                                        // Endziel unter der Zeit, zuerst (Lauftext)
-      lauf_k(ctx, s->endk[i], s_f14b, GRect(xt, yy + 28, 192 - xt, 18), K_DUNKEL, K_PAPIER, yy + 33, 12);
+      lauf_k(ctx, s->endk[i], s_f14b, GRect(xt + hx, yy + 28, 192 - xt - hx, 18), K_DUNKEL, K_PAPIER, yy + 33, 12);
+    if (hx) haus(ctx, xt, yy + 33, s->heim[i], K_TINTE, K_PAPIER);
     graphics_context_set_fill_color(ctx, K_ROT);
     graphics_fill_rect(ctx, GRect(8, yy + 6, bw, 27), 4, GCornersAll);
     k_text(ctx, lin, s_f24b, GRect(8, yy + 1, bw, 30), GTextAlignmentCenter, GColorWhite);
@@ -952,7 +1060,7 @@ static void k_anzeige_fuss(GContext *ctx) {
     case ST_FEHLER: snprintf(buf, sizeof(buf), "Fehler"); farbe = GColorRed; break;
     case ST_STANDORT: snprintf(buf, sizeof(buf), "Kein Standort"); farbe = GColorRed; break;
     case ST_SOLL: case ST_LIVE: {
-      const bool rmv = !strncmp(quelle, "RMV", 3), db = strstr(quelle, "DB") != NULL;   // "RMV+DB" / "TR+DB" seit 0.9.0
+      const bool rmv = !strncmp(quelle, "RMV", 3), db = strchr(quelle, '+') != NULL;   // "RMV+DB" / "TR+DB" seit 0.9.0; strchr statt strstr spart 0,8 KB (0.16.0)
       if (!strncmp(quelle, "AN", 2)) snprintf(buf, sizeof(buf), "Ankunft bis %s", quelle + 2);   // Ankommen um (0.11.0)
       else snprintf(buf, sizeof(buf), "%s%s %s", rmv ? "RMV" : "Transitous", db ? " + DB" : "", status == ST_LIVE ? "live" : "Fahrplan");
       farbe = status == ST_LIVE ? GColorFromHEX(0x55FF00) : GColorFromHEX(0xFFAA00);
@@ -1035,7 +1143,9 @@ static void k_start_zeile(GContext *ctx, const Strecke *s, int i, int yy, int32_
   snprintf(zeit, sizeof(zeit), "%02d:%02d", h, m);
   if (v != AUSFALL) { const int min = (s->dep[i] - now) / 60; if (min < 100) snprintf(rs, sizeof(rs), "%d'", min); }
   const int rand = rs[0] ? 194 - k_breite(rs, s_f28b) - 6 : 194;
-  lauf_k(ctx, s->endk[i][0] ? s->endk[i] : s->end[i], s_f18b, GRect(xt, yy - 4, rand - xt, 24), K_TINTE, K_PAPIER, yy, 18);   // zuerst
+  const int hx = s->heim[i] ? 15 : 0;                                // Heimathaltestelle: Haus vor dem Endziel (0.16.0)
+  lauf_k(ctx, s->endk[i][0] ? s->endk[i] : s->end[i], s_f18b, GRect(xt + hx, yy - 4, rand - xt - hx, 24), K_TINTE, K_PAPIER, yy, 18);   // zuerst
+  if (hx) haus(ctx, xt, yy + 5, s->heim[i], K_TINTE, K_PAPIER);
   graphics_context_set_stroke_color(ctx, K_GRAU);
   graphics_draw_line(ctx, GPoint(6, yy - 3), GPoint(194, yy - 3));
   graphics_context_set_fill_color(ctx, v == AUSFALL ? K_GRAU : K_ROT);
@@ -1088,13 +1198,27 @@ static int liste_versatz(void) {
   if (!n || s_modus != M_LISTE) return 0;
   return s_layout == LAYOUT_PHOSPHOR ? n * 16 + 6 : n * 20 + 4;
 }
+// Listen (0.16.0): \x01/\x02 vorn (vom Handy, WEITERE FAHRTEN) = Haus rechts wie auf der Seite. Werteliste, Zahl und
+// Heimathaltestelle: Auswahlkreis rechts, voll = aktueller Wert (-1 = kein Kreis). Ein Wert gilt sofort beim Wählen,
+// die Liste bleibt offen, damit man die Folge sieht und gleich wieder ändern kann (Wunsch Seb 2026-10-16)
+static int l_haus(const char *t) { return t[0] == 1 || t[0] == 2 ? t[0] : 0; }
+static int einst_wert(int s);
+static int s_lset;                 // Einstellung der offenen Werteliste
+#define EIGEN 99           // OHNE TASTE: Eintrag „nach … min“ der Werteliste öffnet die Zahl (1–60 min)
+static int l_marke(int i) {
+  if (s_lart == L_ZAHL) return i > 0 ? i == s_ohne : -1;
+  if (s_lart == L_HEIM) return i == 0 ? -1 : (s_lakt[i] == A_HEIM_WEG) != (s_heim[0][0] != '\0');
+  if (s_lart != L_WERTE || trenner(i)) return -1;
+  const int w = s_lwert[i], v = einst_wert(s_lset);
+  return s_lset == S_OHNE && w == EIGEN ? (v > 0 && v != 5) : w == v;
+}
 // Einstellung (0.15.0): oben der Name, darunter der Wert als Satzteil; gewählt: Balken, der Wert läuft, wenn zu lang
 static void k_zeile2(GContext *ctx, const char *t, int y, bool gew) {
   char name[LTXT];
   const char *bar = strchr(t, '|');
   snprintf(name, sizeof(name), "%.*s", bar ? (int)(bar - t) : (int)strlen(t), t);
   const char *wert = bar ? bar + 1 : "";
-  const GColor bg = gew ? K_TINTE : K_PAPIER, fg = gew ? K_PAPIER : K_TINTE;
+  const GColor bg = gew ? K_BALKEN : K_PAPIER, fg = gew ? K_BALKENT : K_TINTE;
   if (gew) {
     k_flaeche(ctx, GRect(0, y, 200, K_ZEILE2), bg);
     lauf_k(ctx, wert, s_f14b, GRect(6, y + 16, 188, 20), fg, bg, y + 19, 18);
@@ -1127,15 +1251,21 @@ static void k_liste(GContext *ctx) {
     if (y + l_hoehe() > 208) break;
     const char *t = s_ltext[i][0] ? s_ltext[i] : "...";
     if (s_lzwei) { k_zeile2(ctx, t, y, i == s_lsel); continue; }
-    if (i != s_lsel) {
-      if (trenner(i)) lauf_k(ctx, t, s_f18, GRect(6, y - 3, 188, 24), K_TINTE, K_PAPIER, y, K_ZEILE);   // Erklärzeile läuft (0.15.0)
-      else k_text(ctx, t, s_f18, GRect(6, y - 3, 188, 24), GTextAlignmentLeft, K_TINTE);
+    const int hs = l_haus(t), mk = l_marke(i), w = (hs || mk >= 0) ? 168 : 188;   // rechts Haus bzw. Kreis (0.16.0)
+    if (hs) t++;
+    const bool gew = i == s_lsel;
+    const GColor fg = gew ? K_BALKENT : K_TINTE, bg = gew ? K_BALKEN : K_PAPIER;
+    if (gew) {                                                     // gewählte Zeile: Balken, Lauftext
+      k_flaeche(ctx, GRect(0, y, 200, K_ZEILE), bg);
+      lauf_k(ctx, t, s_f18b, GRect(6, y - 3, w, 24), fg, bg, y, K_ZEILE);
+    } else {
+      if (trenner(i)) lauf_k(ctx, t, s_f18, GRect(6, y - 3, w, 24), fg, bg, y, K_ZEILE);   // Erklärzeile läuft (0.15.0)
+      else k_text(ctx, t, s_f18, GRect(6, y - 3, w, 24), GTextAlignmentLeft, fg);
       graphics_context_set_stroke_color(ctx, K_GRAU);
       graphics_draw_line(ctx, GPoint(6, y + K_ZEILE - 1), GPoint(194, y + K_ZEILE - 1));
-      continue;
     }
-    k_flaeche(ctx, GRect(0, y, 200, K_ZEILE), K_TINTE);           // gewählte Zeile: Balken, Lauftext
-    lauf_k(ctx, t, s_f18b, GRect(6, y - 3, 188, 24), K_PAPIER, K_TINTE, y, K_ZEILE);
+    if (hs) haus(ctx, 181, y + 6, hs, fg, bg);
+    if (mk >= 0) l_kreis(ctx, 185, y + 11, mk, fg);
   }
   if (s_lanz > l_zeilen()) snprintf(buf, sizeof(buf), "%d/%d", s_lsel + 1, s_lanz);
   else buf[0] = '\0';
@@ -1252,7 +1382,9 @@ static void p_seite(GContext *ctx, const Strecke *s, int32_t now) {
     const int i = idx[k], yy = y + k * dy, v = s->del[i];
     const bool ausfall = v == AUSFALL;
     const char *lin = s->lin[i];
-    if (!ziel && s->end[i][0]) lauf_p(ctx, s->end[i], 4, 196, yy + 25, 2, P_GRAU);
+    const int hx = !ziel && s->heim[i] ? 15 : 0;                  // Heimathaltestelle: Haus vor dem Endziel (0.16.0)
+    if (!ziel && s->end[i][0]) lauf_p(ctx, s->end[i], 4 + hx, 196, yy + 25, 2, P_GRAU);
+    if (hx) haus(ctx, 4, yy + 25, s->heim[i], s->heim[i] == 2 ? P_TEXT : P_GRAU, P_HG);
     // Linie invers: grünes Kästchen, schwarze Schrift; Steig als dunkle Lasche dahinter
     const bool gross = gross_moeglich(lin);
     const int lw = (gross ? P_GW(lin, 2) : P_W(lin, 2)) + 8;
@@ -1550,7 +1682,9 @@ static void p_start_zeile(GContext *ctx, const Strecke *s, int i, int yy, int32_
   if (!ausfall) { const int min = (s->dep[i] - now) / 60; if (min < 100) snprintf(rs, sizeof(rs), "%d'", min); }
   int rand = 196;
   if (rs[0]) { rand = 196 - P_GW(rs, 3); P_GROSS(rs, rand, yy + 3, 3, P_TEXT); rand -= 6; }
-  lauf_p(ctx, s->end[i], xt, rand, yy + 2, 2, P_TEXT);
+  const int hx = s->heim[i] ? 15 : 0;                              // Heimathaltestelle (0.16.0)
+  lauf_p(ctx, s->end[i], xt + hx, rand, yy + 2, 2, P_TEXT);
+  if (hx) haus(ctx, xt, yy + 2, s->heim[i], s->heim[i] == 2 ? P_TEXT : P_GRAU, P_HG);
   int x = xt;
   P_KLEIN(zeit, x, yy + 15, ausfall ? P_GRAU : (v != vz ? P_WARN : P_GRAU));
   x += P_W(zeit, 2) + 6;
@@ -1609,14 +1743,18 @@ static void p_liste(GContext *ctx) {
       if (y + l_hoehe() > 207) break;
       const char *t = s_ltext[i][0] ? s_ltext[i] : "...";
       if (s_lzwei) { p_zeile2(ctx, t, y, i == s_lsel); continue; }
-      if (i != s_lsel) {
-        if (trenner(i)) lauf_p(ctx, t, 6, 194, y + 6, 2, P_TEXT);   // Erklärzeile läuft, wenn zu lang (0.15.0)
-        else p_text(ctx, F35, F35_N, F35_H, t, 6, y + 6, 2, P_TEXT, 0, 194);
-        continue;
-      }
-      graphics_context_set_fill_color(ctx, P_TEXT);                  // gewählte Zeile invers
-      graphics_fill_rect(ctx, GRect(0, y + 1, 200, P_ZEILE - 2), 0, GCornerNone);
-      lauf_p(ctx, t, 6, 194, y + 6, 2, P_HG);
+      const int hs = l_haus(t), mk = l_marke(i), x1 = (hs || mk >= 0) ? 174 : 194;   // rechts Haus bzw. Kreis (0.16.0)
+      if (hs) t++;
+      const bool gew = i == s_lsel;
+      const GColor fg = gew ? P_HG : P_TEXT;
+      if (gew) {                                                     // gewählte Zeile invers
+        graphics_context_set_fill_color(ctx, P_TEXT);
+        graphics_fill_rect(ctx, GRect(0, y + 1, 200, P_ZEILE - 2), 0, GCornerNone);
+        lauf_p(ctx, t, 6, x1, y + 6, 2, fg);
+      } else if (trenner(i)) lauf_p(ctx, t, 6, x1, y + 6, 2, fg);    // Erklärzeile läuft, wenn zu lang (0.15.0)
+      else p_text(ctx, F35, F35_N, F35_H, t, 6, y + 6, 2, fg, 0, x1);
+      if (hs) haus(ctx, 181, y + 6, hs, fg, gew ? P_TEXT : P_HG);
+      if (mk >= 0) l_kreis(ctx, 185, y + 11, mk, fg);
     }
   }
   buf[0] = '\0';
@@ -1672,7 +1810,7 @@ static const char *karte_r2(void) {                    // rechts oben: nächster
 }
 static void karte_zahl(char *zahl, size_t nz, const char **einheit, bool *warn) {
   const int halte = karte_halte();
-  if (halte >= 1 && halte <= 3) { snprintf(zahl, nz, "%d", halte); *einheit = T("HALTE", halte == 1 ? "Halt" : "Halte"); *warn = true; return; }
+  if (halte >= 1 && halte <= 3) { snprintf(zahl, nz, "%d", halte); *einheit = TV("HALTE", halte == 1 ? "Halt" : "Halte"); *warn = true; return; }
   int m = (s_k->zeit - jetzt() + 59) / 60;
   if (m < 0) m = 0;
   if (m > 999) m = 999;
@@ -1782,19 +1920,256 @@ static void k_karte(GContext *ctx) {
   k_fuss(ctx, s_k->fuss, false, K_TINTE, s_dstand);
 }
 
+// ---------- Ansicht Cartoon (0.16.0) ----------
+// Entwurf linie8-einfahrt-entwurf.png (Seb 2026-10-15): jede Abfahrt eine Straße, der Bus fährt bei 10 min links ins
+// Bild, seine Front an der Haltestelle ist 0 min (linear, 15,2 px/min). Rechts der Mast mit H, das Schild mit Steig bzw.
+// Gleis, darunter die Abfahrtszeit. Verspätung: Schweißtropfen und ein schwerer Anhänger mit +n, Namenszeile orange.
+// Ausfall: graue Bahn, Bus mit Panne und Rauch, Zeit durchgestrichen. Abgefahren: der Bus fährt hinter die
+// Haltestelle (bis die nächste Aktualisierung die Fahrt streicht). In der Fahrt die Zielansicht mit Tafel, ab 5 min vor
+// dem Ausstieg fährt der Bus aufs Ziel zu, die Halte davor stehen an der Straße. Menüs, Listen, Details, Startseite,
+// Strecken nehmen den Aufbau von Papier mit den Cartoon-Farben und Fredoka.
+#define C_STOP 159         // Front bei 0 min berührt den Mast (x 159); 0.17.0, vorher 152 (7 px davor)
+#define C_BH 56            // Bahn: Namenszeile, darunter die Straße (28 px)
+#define C_Y0 32            // erste Bahn
+static int s_cart_ms;              // beim Zeichnen gesetzt: so oft neu zeichnen, solange ein Bus fährt (0 = jede Minute)
+static AppTimer *s_cart_timer;
+static int32_t s_raus;             // Ausstieg, für den schon vibriert wurde
+static GColor c_farbe(const char *l) {                 // Fahrzeugfarbe je Linie, fest über eine Prüfsumme
+  static const uint32_t F[] = { 0xFFFF55, 0x55AAFF, 0xAAFF55, 0xFFAA55, 0xAAAAFF };
+  unsigned h = 0;
+  while (*l) h = h * 31 + (uint8_t)*l++;
+  return GColorFromHEX(F[h % 5]);
+}
+// Straße (Bus) bzw. Gleis (Tram, Zug) über die ganze Breite, die Haltestelle steht davor (0.17.0)
+static void c_strasse(GContext *ctx, int y, bool gleis) {
+  if (gleis) {                                         // Schotter, Schwellen, Schiene unter den Rädern
+    k_flaeche(ctx, GRect(0, y + 24, 200, 4), C_STRASSE);
+    for (int k = 0; k < 17; k++) k_flaeche(ctx, GRect(3 + k * 12, y + 25, 6, 3), GColorFromHEX(0xAA5500));
+    k_flaeche(ctx, GRect(0, y + 23, 200, 2), C_NAVY);
+    return;
+  }
+  k_flaeche(ctx, GRect(0, y, 200, 28), C_STRASSE);
+  k_flaeche(ctx, GRect(0, y, 200, 2), C_HELL);
+  for (int k = 0; k < 8; k++) k_flaeche(ctx, GRect(6 + k * 26, y + 14, 12, 2), GColorWhite);
+}
+static void c_kreis(GContext *ctx, int x, int y, int r, GColor f, GColor rand) {
+  graphics_context_set_fill_color(ctx, f);
+  graphics_fill_circle(ctx, GPoint(x, y), r);
+  graphics_context_set_stroke_color(ctx, rand);
+  graphics_draw_circle(ctx, GPoint(x, y), r);
+}
+// Fahrzeug mit der Front bei fx, Oberkante y, w breit, 20 hoch. f: 1 Fahrgäste, 2 Schweißtropfen, 4 Panne mit Rauch,
+// 8 Stromabnehmer (Tram, Zug), 16 Gelenk (Tram). Bus 54, Tram 62, Zug 72 px: ein Fenster je 16 px
+static void c_bus(GContext *ctx, int fx, int y, int w, const char *nr, GColor farbe, int f) {
+  int nw = k_breite(nr, s_cf12) + 5;
+  if (nw < 11) nw = 11;
+  const int x = fx - w, nf = w / 16, fw = (w - nw - 9) / nf;
+  graphics_context_set_fill_color(ctx, farbe);
+  graphics_fill_rect(ctx, GRect(x, y, w, 20), 4, GCornersAll);
+  graphics_context_set_stroke_color(ctx, C_NAVY);
+  graphics_draw_round_rect(ctx, GRect(x, y, w, 20), 4);
+  for (int k = 0; k < nf; k++) {                       // Fenster, in der gewählten Bahn mit Fahrgästen
+    const int wx = x + 3 + k * (fw + 1);
+    k_flaeche(ctx, GRect(wx, y + 3, fw, 8), C_HIMMEL);
+    graphics_context_set_stroke_color(ctx, C_NAVY);
+    graphics_draw_rect(ctx, GRect(wx, y + 3, fw, 8));
+    if ((f & 1) && k < 2) c_kreis(ctx, wx + fw / 2, y + 8, 2, GColorFromHEX(0xFFAAAA), C_NAVY);
+  }
+  graphics_context_set_fill_color(ctx, C_ROSA);        // Linienschild vorn
+  graphics_fill_rect(ctx, GRect(fx - nw - 2, y + 2, nw, 12), 2, GCornersAll);
+  k_text(ctx, nr, s_cf12, GRect(fx - nw - 2, y, nw, 16), GTextAlignmentCenter, GColorWhite);
+  for (int k = 0; k < 2; k++) { const int rx = k ? fx - w / 5 : x + w / 5; c_kreis(ctx, rx, y + 20, 3, C_NAVY, C_NAVY); k_flaeche(ctx, GRect(rx, y + 20, 1, 1), C_HELL); }
+  if (f & 8) {                                         // Stromabnehmer auf dem Dach
+    const int px = x + w / 3;
+    graphics_context_set_stroke_color(ctx, C_NAVY);
+    graphics_draw_line(ctx, GPoint(px - 3, y), GPoint(px + 1, y - 4));
+    graphics_draw_line(ctx, GPoint(px + 1, y - 4), GPoint(px + 4, y));
+    k_flaeche(ctx, GRect(px - 4, y - 5, 11, 1), C_NAVY);
+  }
+  if (f & 16) k_flaeche(ctx, GRect(x + (w - nw) / 2, y + 1, 2, 18), C_NAVY);   // Gelenk
+  if (f & 2)                                           // Schweiß: drei Tropfen über der Front
+    for (int k = 0; k < 3; k++) c_kreis(ctx, fx + 2 - k * 5, y - 2 - (k == 1) * 3, 2, GColorFromHEX(0x55AAFF), C_NAVY);
+  if (f & 4)                                           // Panne: Rauch über der Front
+    for (int k = 0; k < 4; k++) c_kreis(ctx, fx - 10 + k * 5, y - 1 - k * 3, 4 - (k == 3), C_HELL, C_STRASSE);
+}
+static void c_anhaenger(GContext *ctx, int x, int y, const char *t) {   // schweres Gewicht, Deichsel bei x (Heck des Busses)
+  GPoint p[4] = { { x - 34, y + 17 }, { x - 29, y + 1 }, { x - 13, y + 1 }, { x - 8, y + 17 } };
+  GPath g = { .num_points = 4, .points = p, .rotation = 0, .offset = GPointZero };
+  k_flaeche(ctx, GRect(x - 9, y + 10, 9, 2), C_NAVY);
+  k_flaeche(ctx, GRect(x - 24, y - 3, 6, 4), C_STRASSE);
+  graphics_context_set_fill_color(ctx, C_STRASSE);
+  gpath_draw_filled(ctx, &g);
+  graphics_context_set_stroke_color(ctx, C_NAVY);
+  gpath_draw_outline(ctx, &g);
+  k_text(ctx, t, s_cf12, GRect(x - 34, y, 26, 16), GTextAlignmentCenter, C_ORANGE);
+  c_kreis(ctx, x - 28, y + 19, 3, C_NAVY, C_NAVY);
+  c_kreis(ctx, x - 14, y + 19, 3, C_NAVY, C_NAVY);
+}
+// Haltestelle rechts der Straße, y = Oberkante der Bahn: Mast mit H, Schild mit Steig bzw. Gleis, darunter die Zeit
+static void c_halt(GContext *ctx, int y, const char *steig, const char *zeit, GColor zc, bool aus) {
+  k_flaeche(ctx, GRect(159, y + 10, 3, C_BH - 10), C_NAVY);
+  graphics_context_set_stroke_width(ctx, 2);
+  c_kreis(ctx, 160, y + 12, 7, GColorFromHEX(0xFFFF00), GColorFromHEX(0x00AA55));
+  graphics_context_set_stroke_width(ctx, 1);
+  k_text(ctx, "H", s_cf12, GRect(154, y + 2, 13, 16), GTextAlignmentCenter, GColorFromHEX(0x00AA55));
+  if (steig[0]) {
+    graphics_context_set_fill_color(ctx, C_NAVY);
+    graphics_fill_rect(ctx, GRect(169, y + 4, 30, 19), 5, GCornersAll);
+    k_text(ctx, steig, strlen(steig) > 2 ? s_cf12 : s_cf15, GRect(169, y + (strlen(steig) > 2 ? 4 : 2), 30, 20), GTextAlignmentCenter, GColorWhite);
+  }
+  graphics_context_set_fill_color(ctx, GColorWhite);   // Zeit auf einem Schild, Straße bzw. Gleis laufen dahinter durch
+  graphics_fill_rect(ctx, GRect(166, y + 29, 32, 14), 3, GCornersAll);
+  k_text(ctx, zeit, s_cf12, GRect(164, y + 26, 36, 16), GTextAlignmentCenter, zc);
+  if (aus) k_flaeche(ctx, GRect(168, y + 34, 30, 2), C_ORANGE);
+}
+static void c_steppe(GContext *ctx, int x, int y) {    // Steppenläufer auf der leeren Straße
+  const GColor b = GColorFromHEX(0xAA5500);
+  graphics_context_set_stroke_color(ctx, b);
+  graphics_context_set_stroke_width(ctx, 2);
+  graphics_draw_circle(ctx, GPoint(x, y), 8);
+  graphics_context_set_stroke_width(ctx, 1);
+  graphics_draw_circle(ctx, GPoint(x + 1, y - 1), 4);
+  graphics_draw_line(ctx, GPoint(x - 6, y + 3), GPoint(x + 6, y - 4));
+  for (int k = 0; k < 2; k++) graphics_draw_line(ctx, GPoint(x - 18 - k * 3, y - 2 + k * 4), GPoint(x - 11, y - 2 + k * 4));
+}
+static void c_zeit(char *buf, size_t n, int32_t t) { int h, m; berlin_hm(t, &h, &m); snprintf(buf, n, "%02d:%02d", h, m); }
+static void c_fuss(GContext *ctx) {                    // Fuß der Seite: Stand und live bzw. Zustand, rechts A1/4
+  char links[32], re[12];
+  int32_t stand = 0;
+  const char *q = "";
+  const int st = seiten_status(&stand, &q);
+  c_zeit(re, sizeof(re), stand);
+  snprintf(links, sizeof(links), st == ST_LIVE || st == ST_SOLL ? (st == ST_LIVE ? "Stand %s · live" : "Stand %s · Fahrplan")
+           : st == ST_LADE ? "Lade …" : st == ST_NETZ ? "Kein Netz" : st == ST_STANDORT ? "Kein Standort" : st == ST_FEHLER ? "Fehler" : "", re);
+  seitenzeichen(re, sizeof(re), false);
+  c_rasen(ctx, 200, links, (st == ST_LIVE || st == ST_SOLL) && stand_alt(stand) ? C_ORANGE : C_NAVY, re);
+}
+static void cart_anzeige(GContext *ctx) {
+  if (s_rubrik == 1 || !zeigt_seite()) { k_anzeige(ctx); return; }   // Strecken und leere Rubrik: Aufbau von Papier
+  const int32_t now = jetzt();
+  const Strecke *s = aktuelle();
+  const bool ziel = hat_ziel(s);
+  const char *vt = vt_str(s);
+  char buf[2 * NAMELEN + 8], re[24], zeit[8], st[8];
+  int idx[MAXD];
+  int n = naechste(s, now - 60, idx);                  // abgefahrene bleiben 1 min stehen: der Bus fährt weg
+  if (vt[0] && n > MAXD - 1) n = MAXD - 1;
+  k_flaeche(ctx, GRect(0, 0, 200, 228), C_HIMMEL);
+  bool gewaehlt = false;
+  for (int k = 0; k < n; k++) {
+    const int i = idx[k], y = C_Y0 + k * C_BH, v = s->del[i], dt = s->dep[i] - now, ry = y + 23;
+    const bool aus = v == AUSFALL, gew = !gewaehlt && dt >= 0, zug = s->mi[i] == 2, gleis = zug || s->mi[i] == 1;
+    gewaehlt = gewaehlt || gew;
+    const GColor bg = gew ? C_ROSA : aus ? C_HELL : C_HIMMEL;
+    k_flaeche(ctx, GRect(0, y, 200, C_BH), bg);
+    if (!gew) k_flaeche(ctx, GRect(0, y + C_BH - 1, 200, 1), GColorWhite);
+    if (aus) snprintf(re, sizeof(re), "fällt aus");
+    else if (dt < 0) snprintf(re, sizeof(re), "fährt ab");
+    else if (dt < 60) snprintf(re, sizeof(re), "jetzt");
+    else if (v > 0) snprintf(re, sizeof(re), "+%d · %d min", v, (int)(dt / 60));
+    else snprintf(re, sizeof(re), "%d min", (int)(dt / 60));
+    const int rw = k_breite(re, s_cf15), hx = !ziel && s->heim[i] ? 15 : 0;
+    snprintf(buf, sizeof(buf), "%s %s", s->lin[i], ziel ? k_name1(s) : s->endk[i]);
+    lauf_k(ctx, buf, s_cf15, GRect(6 + hx, y + 1, 140 - rw - hx, 20), C_NAVY, bg, y + 1, 21);   // zuerst (Lauftext)
+    if (hx) haus(ctx, 6, y + 7, s->heim[i], C_NAVY, bg);
+    k_text(ctx, re, s_cf15, GRect(148 - rw, y + 1, rw + 4, 20), GTextAlignmentRight, aus || v > 0 ? C_ORANGE : C_NAVY);
+    c_strasse(ctx, ry, gleis);
+    const int bw = zug ? 72 : gleis ? 62 : 54, fx = C_STOP - (s->dep[i] / 60 * 60 - now) * C_STOP / 600;   // auf die volle Minute:
+                                                     // die Front erreicht den Mast, wenn die Uhr auf die Abfahrtszeit springt
+    if (fx > 0) {
+      if (v > 0 && !aus) { snprintf(st, sizeof(st), "+%d", v); c_anhaenger(ctx, fx - bw, ry + 1, st); }
+      c_bus(ctx, fx, ry + 2, bw, s->lin[i], aus ? C_HELL : c_farbe(s->lin[i]), (gew ? 1 : 0) | (v > 0 && !aus ? 2 : 0) | (aus ? 4 : 0) | (gleis ? 8 : 0) | (gleis && !zug ? 16 : 0));
+      s_cart_ms = 5000;                                // 0.17.0: alle 5 s, solange ein Fahrzeug im Bild ist
+    }
+    const int vz = (aus || s_abfahrt == ABF_AKTUELL) ? 0 : v;   // vorne die Fahrplanzeit (oder die aktuelle, orange)
+    c_zeit(zeit, sizeof(zeit), s->dep[i] - vz * 60);
+    snprintf(st, sizeof(st), zug && s->steig[i][0] ? "Gl %s" : "%s", s->steig[i]);
+    c_halt(ctx, y, st, zeit, aus ? C_STRASSE : v != vz ? C_ORANGE : C_NAVY, aus);
+  }
+  if (vt[0]) k_vorschlag(ctx, vt, C_Y0 + (MAXD - 1) * C_BH + 4);   // FRUEHER DA statt der dritten Bahn
+  if (!n) k_text(ctx, s->status == ST_LADE ? "Lade …" : s->status == ST_STANDORT ? "Kein Standort" : "Keine Fahrt", s_cf18,
+                 GRect(6, C_Y0 + 4, 188, 24), GTextAlignmentLeft, C_NAVY);
+  c_kopf(ctx, k_name0(s));
+  c_fuss(ctx);
+  k_rubrik(ctx);
+}
+// Fahrt im Fahrzeug (Phase 2 und 4): Ausstieg groß, Tafel mit Minuten und Halten, unten die Straße zum Ausstieg.
+// Mehr als 5 min: leere Straße mit Steppenläufer. Ab 5 min fährt der Bus aufs Ziel zu (5 min = linker Rand),
+// die nächsten Halte stehen an der Straße. Letzte Minute: JETZT RAUS!, die Uhr vibriert einmal.
+static void cart_karte(GContext *ctx) {
+  const int32_t now = jetzt(), dt = s_k->zeit - now;
+  char buf[48], lin[LINLEN], zeit[8];
+  const bool raus = dt <= 60;
+  k_flaeche(ctx, GRect(0, 0, 200, 228), C_HIMMEL);
+  k_text(ctx, "Ausstieg", s_cf12, GRect(0, 30, 200, 16), GTextAlignmentCenter, C_NAVY);
+  const GFont nf = k_breite(s_k->name, s_cf22) <= 192 ? s_cf22 : s_cf18;
+  lauf_k(ctx, s_k->name, nf, GRect(k_breite(s_k->name, nf) < 192 ? 100 - k_breite(s_k->name, nf) / 2 : 4, 42, 192, 28), C_NAVY, C_HIMMEL, 44, 26);
+  c_zeit(zeit, sizeof(zeit), s_k->zeit);
+  snprintf(buf, sizeof(buf), s_k->steig[0] ? "an %s · Steig %s" : "an %s", zeit, s_k->steig);
+  k_text(ctx, buf, s_cf12, GRect(0, 67, 200, 16), GTextAlignmentCenter, C_STRASSE);
+  graphics_context_set_fill_color(ctx, C_ROSA);        // Tafel: rosa Rand, nachtblau (Ausstieg: ganz rosa)
+  graphics_fill_rect(ctx, GRect(28, 86, 144, 52), 8, GCornersAll);
+  graphics_context_set_fill_color(ctx, raus ? C_ROSA : C_NAVY);
+  graphics_fill_rect(ctx, GRect(31, 89, 138, 46), 6, GCornersAll);
+  const GColor tc = raus ? GColorWhite : GColorFromHEX(0xFFFF00);
+  k_text(ctx, raus ? "JETZT" : "NOCH", s_cf12, GRect(31, 88, 138, 16), GTextAlignmentCenter, tc);
+  const int halte = karte_halte();
+  if (raus) snprintf(buf, sizeof(buf), "RAUS!");
+  else snprintf(buf, sizeof(buf), "%d min", (int)((dt + 59) / 60));
+  k_text(ctx, buf, s_cf22, GRect(31, 96, 138, 28), GTextAlignmentCenter, tc);
+  if (halte > 0 && !raus) {
+    snprintf(buf, sizeof(buf), halte == 1 ? "nächster Halt: Ausstieg" : dt <= 300 ? "%d Halte bis zum Ausstieg" : "%d Halte", halte);
+    k_text(ctx, buf, s_cf12, GRect(31, 119, 138, 16), GTextAlignmentCenter, tc);
+  }
+  const char *g = strchr(s_k->kopf, '>'), *a = g && g > s_k->kopf + 1 ? g - 1 : NULL;   // Linie: "Im Bus 8 > Luisenplatz"
+  while (a && a > s_k->kopf && a[-1] != ' ') a--;
+  snprintf(lin, sizeof(lin), "%.*s", a ? (int)(g - 1 - a) : 0, a ? a : "");
+  const int ry = 170, m = s_k->kopf[3] | 32;        // Verkehrsmittel aus dem Kopf: "Im Bus", "In Tram", "Im Zug"
+  const bool zug = m == 'z', gleis = zug || m == 't';
+  c_strasse(ctx, ry, gleis);
+  s_cart_ms = 5000;                                    // 0.17.0: alle 5 s
+  if (dt > 300) c_steppe(ctx, 30 + (int)((now / 5) % 6) * 18, ry + 13);   // gähnende Leere
+  else {
+    for (int k = 0; k < 3; k++) {                      // die nächsten Halte vor dem Ausstieg, Abstand nach Fahrzeit
+      const int32_t t = s_k->ht[k];
+      if (!t || t <= now || s_k->zeit - t > 300) continue;
+      const int x = C_STOP - (s_k->zeit - t) * C_STOP / 300;
+      k_flaeche(ctx, GRect(x - 1, ry - 10, 2, 11), C_NAVY);
+      c_kreis(ctx, x, ry - 11, 4, GColorFromHEX(0xFFFF00), C_NAVY);
+      k_text(ctx, s_k->hn[k], s_cf12, GRect(x - 40, ry - 36 + (k & 1) * 10, 80, 16), GTextAlignmentCenter, C_NAVY);
+    }
+    const int32_t db = s_k->zeit / 60 * 60 - now;     // wie bei den Abfahrten: am Ziel, wenn die Uhr auf die Ankunft springt
+    c_bus(ctx, C_STOP - (db > 0 ? db : 0) * C_STOP / 300, ry + 2, zug ? 72 : gleis ? 62 : 54, lin, c_farbe(lin),
+          1 | (gleis ? 8 : 0) | (gleis && !zug ? 16 : 0));
+  }
+  snprintf(lin, sizeof(lin), zug && s_k->steig[0] ? "Gl %s" : "%s", s_k->steig);
+  c_halt(ctx, ry - 23, lin, zeit, C_NAVY, false);
+  stand_text(buf, sizeof(buf), s_dstand, true);
+  c_rasen(ctx, 200, s_k->fuss, C_NAVY, buf);
+  c_kopf(ctx, a ? a : s_k->kopf);                      // Kopf ab der Linie: "8 > Luisenplatz" (wie im Entwurf)
+  if (raus && s_k->zeit - s_raus > 300) { s_raus = s_k->zeit; vibes_double_pulse(); }   // einmal je Ausstieg
+}
+static void cart_cb(void *data) { s_cart_timer = NULL; layer_mark_dirty(s_layer); }
+
 static void lauf_cb(void *data);
 static void ab_planen(void);
 static void zeichnen(Layer *layer, GContext *ctx) {
   s_lauf_bedarf = false;                               // die Seiten melden beim Zeichnen, ob ein Text laufen muss
+  s_cart_ms = 0;                                       // Cartoon: der Bus meldet, ob er fährt
   if (KLAR_ART) {
-    if (s_modus == M_ANZEIGE) { if (s_start) k_start(ctx); else k_anzeige(ctx); }
-    else if (s_modus == M_DETAIL) { if (karte_zeigen()) k_karte(ctx); else k_detail(ctx); }
+    if (s_modus == M_ANZEIGE) { if (s_start) k_start(ctx); else if (CARTOON) cart_anzeige(ctx); else k_anzeige(ctx); }
+    else if (s_modus == M_DETAIL) {
+      if (!karte_zeigen()) k_detail(ctx);
+      else if (CARTOON && (s_k->phase == 2 || s_k->phase == 4)) cart_karte(ctx);   // im Fahrzeug
+      else k_karte(ctx);
+    }
     else if (s_modus == M_SUCHE) k_suche(ctx); else if (s_modus == M_FRAGE) k_frage(ctx); else k_liste(ctx);
   } else {
     if (s_modus == M_ANZEIGE) { if (s_start) p_start(ctx); else p_anzeige(ctx); } else if (s_modus == M_DETAIL) { if (karte_zeigen()) p_karte(ctx); else p_detail(ctx); }
     else if (s_modus == M_SUCHE) p_suche(ctx); else if (s_modus == M_FRAGE) p_frage(ctx); else p_liste(ctx);
   }
   if (s_lauf_bedarf && !s_lauf && s_lauf_rest >= LAUF_MS) s_lauf = app_timer_register(LAUF_MS, lauf_cb, NULL);
+  if (s_cart_ms && !s_cart_timer) s_cart_timer = app_timer_register(s_cart_ms, cart_cb, NULL);
   if (s_modus == M_ANZEIGE) ab_planen();
 }
 
@@ -2026,6 +2401,11 @@ static void seiten_name(char *buf, size_t n) {          // "HBF > KURHAUS" bzw. 
 }
 static bool ist_fav(int32_t maske, int bit) { return bit >= 0 && bit < 31 && ((maske >> bit) & 1); }
 
+// Heimathaltestelle (0.16.0, Wunsch Seb): im Menü jeder Abfahrten-Seite, von Abfahrten hier und der Startseite. Die
+// Haltestelle der Seite wird Heimat; gibt es schon eine, heißt der Eintrag … AENDERN (mit Bestätigung). Fehlt, wenn sie es ist
+static void heim_eintrag(const Strecke *s) {
+  if (!s->ist_heim) eintrag(s_heim[0][0] ? T("HEIMATHALTESTELLE AENDERN", "Heimathaltestelle ändern") : T("HEIMATHALTESTELLE", "Heimathaltestelle"), A_HEIM_SEITE);
+}
 static void menue_zeigen(void) {
   char buf[2 * NAMELEN + 16], name[2 * NAMELEN + 4];
   s_aus_einst = false;
@@ -2067,6 +2447,7 @@ static void menue_zeigen(void) {
       eintrag(T("NEU ANLEGEN", "Neu anlegen"), A_NEU);
       if (s_hier_n > 0) eintrag(T("ABFAHRT SPEICHERN", "Abfahrt speichern"), A_SOFORT_SPEICHERN);
       if (s_hier_n > 0 && !ist_fav(s_sfav, 0)) { bit_name(buf, sizeof(buf), T("FAVORIT: ", "Favorit: "), s->name[0], s->klar[0]); eintrag(buf, A_FAV_A); }
+      if (s_hier_n > 0) heim_eintrag(s);
     } else {
       const bool da = s_anzahl > 0;
       const Strecke *s = aktuelle();
@@ -2082,6 +2463,7 @@ static void menue_zeigen(void) {
         eintrag(T("AENDERN", "Ändern"), A_AENDERN);
         if (!ist_fav(s_hfav, 2 * s_seite)) { bit_name(buf, sizeof(buf), T("FAVORIT: ", "Favorit: "), s->name[0], s->klar[0]); eintrag(buf, A_FAV_A); }
         if (hat_ziel(s) && !ist_fav(s_hfav, 2 * s_seite + 1)) { bit_name(buf, sizeof(buf), T("FAVORIT: ", "Favorit: "), s->name[1], s->klar[1]); eintrag(buf, A_FAV_B); }
+        heim_eintrag(s);
       }
     }
   }
@@ -2127,7 +2509,17 @@ static void frage_zeigen(const char *kopf, const char *text, int aktion, int wah
   layer_mark_dirty(s_layer);
 }
 static void aktion_senden(int aktion, int wahl);
-static void frage_ja(void) { aktion_senden(s_faktion, s_fwahl); }
+static void heim_werte_zeigen(void);
+static void frage_ja(void) {
+  if (s_faktion == A_HEIM && s_fwahl < 0) {            // Heimathaltestelle löschen (0.16.0): sofort, zurück in ihre Liste
+    s_heim[0][0] = s_heim[1][0] = '\0';
+    for (int i = 0; i <= MAXS; i++) memset(s_str[i].heim, 0, MAXD);
+    aktion_abschicken(A_HEIM, -1);
+    heim_werte_zeigen();
+    return;
+  }
+  aktion_senden(s_faktion, s_fwahl);
+}
 static void frage_nein(void) { s_modus = M_LISTE; lauf_starten(); layer_mark_dirty(s_layer); }   // die Liste ist noch da
 
 static void umkreis_text(char *buf, size_t n, const char *vor, int m) {   // "UMKREIS 1KM" / "Umkreis: 1 km"
@@ -2140,11 +2532,10 @@ static void umkreis_text(char *buf, size_t n, const char *vor, int m) {   // "UM
 // Suche, Daten). In einer Rubrik steht jede Einstellung mit Namen und darunter dem Wert als Satzteil. Select: zwei Werte
 // schalten direkt um, mehr öffnen die Werteliste — oben eine Erklärzeile wie -- FAVORITEN --, die Auswahl steht auf dem
 // aktuellen Wert. Danach zurück in die Rubrik. Bis 0.14.0 einzeilig, Quelle und Umkreis lose in EINSTELLUNGEN.
-#define EIGEN 99           // OHNE TASTE: Eintrag „nach … min“ der Werteliste öffnet die Zahl (1–60 min)
 typedef struct { uint8_t rub, n; const char *name, *namek, *erkl, *erklk; int16_t w[5]; } Einst;
 static const Einst EINST[S_N] = {
   [S_STARTSEITE] = { L_ANZEIGE, 2, "STARTSEITE", "Startseite", NULL, NULL, { 0, 1 } },
-  [S_ANSICHT]    = { L_ANZEIGE, 2, "ANSICHT", "Ansicht", NULL, NULL, { LAYOUT_PAPIER, LAYOUT_PHOSPHOR } },
+  [S_ANSICHT]    = { L_ANZEIGE, 3, "ANSICHT", "Ansicht", "-- SO SIEHT DIE APP AUS --", "-- So sieht die App aus --", { LAYOUT_PAPIER, LAYOUT_PHOSPHOR, LAYOUT_CARTOON } },
   [S_INVERS]     = { L_ANZEIGE, 2, "INVERTIERT", "Invertiert", NULL, NULL, { 0, 1 } },
   [S_KONTRAST]   = { L_ANZEIGE, 2, "HOHER KONTRAST", "Hoher Kontrast", NULL, NULL, { 0, 1 } },
   [S_ABFAHRT]    = { L_ANZEIGE, 2, "ABFAHRTSZEIT", "Abfahrtszeit", NULL, NULL, { ABF_PLAN, ABF_AKTUELL } },
@@ -2163,7 +2554,7 @@ static void wert_text(int s, int v, char *b, size_t n) {
   const char *t = "";
   switch (s) {
     case S_STARTSEITE: t = v ? T("AN, HALTESTELLE IN DER NAEHE", "an: Haltestelle in der Nähe") : T("AUS", "aus"); break;
-    case S_ANSICHT: t = v == LAYOUT_PHOSPHOR ? T("PHOSPHOR", "Phosphor") : T("PAPIER", "Papier"); break;
+    case S_ANSICHT: t = v == LAYOUT_PHOSPHOR ? T("PHOSPHOR", "Phosphor") : v == LAYOUT_CARTOON ? T("CARTOON", "Cartoon") : T("PAPIER", "Papier"); break;
     case S_INVERS: t = v ? T("AN, SCHWARZ AUF WEISS", "an: weiß auf Schwarz") : T("AUS", "aus"); break;
     case S_KONTRAST: t = v ? T("AN, KEINE GRAUE SCHRIFT", "an: keine graue Schrift") : T("AUS", "aus"); break;
     case S_ABFAHRT: t = v == ABF_AKTUELL ? T("AKTUELL, MIT VERSPAETUNG", "aktuell, mit Verspätung") : T("FAHRPLAN, VERSPAETUNG DAHINTER", "Fahrplan, Verspätung dahinter"); break;
@@ -2208,6 +2599,7 @@ static int einst_wert(int s) {
     default: return s_quelle;
   }
 }
+static const char *heim_name(void) { return KLAR_ART && s_heim[1][0] ? s_heim[1] : s_heim[0]; }
 static const char *rub_name(int art) {
   switch (art) {
     case L_ANZEIGE: return T("ANZEIGE", "Anzeige");
@@ -2241,16 +2633,23 @@ static void rubrik_zeigen(int art, int sel) {          // eine Rubrik; sel: Eins
   char buf[LTXT], w[LTXT];
   int k = 0;
   liste_beginnen(art, rub_name(art));
-  if (art == L_EABF || art == L_ESTR) {                // Abfahrten, Strecken: nur alle löschen (Bestätigungsseite)
+  if (art == L_EABF || art == L_ESTR) {                // Abfahrten: Heimathaltestelle (0.16.0); beide: alle löschen (Bestätigung)
     const int n = art == L_EABF ? s_anzahl : s_ranzahl;
-    if (n > 0) { alle_text(buf, sizeof(buf), n); eintrag(buf, art == L_EABF ? A_F_ALLE_ABF : A_F_ALLE_STR); }
-    else eintrag(T("KEINE GESPEICHERT", "Keine gespeichert"), 0);
+    s_lzwei = true;                                    // seit 0.16.0 zweizeilig wie die übrigen Rubriken
+    if (art == L_EABF) {
+      snprintf(buf, sizeof(buf), "%s|%s", T("HEIMATHALTESTELLE", "Heimathaltestelle"),
+               s_heim[0][0] ? heim_name() : T("KEINE, IM MENUE EINER HALTESTELLE", "keine, im Menü einer Haltestelle"));
+      eintrag(buf, A_HEIM_E);
+    }
+    if (n > 0) snprintf(w, sizeof(w), T("%d GESPEICHERT", "%d gespeichert"), n);
+    snprintf(buf, sizeof(buf), "%s|%s", T("ALLE LOESCHEN", "Alle löschen"), n > 0 ? w : T("KEINE GESPEICHERT", "keine gespeichert"));
+    eintrag(buf, n > 0 ? (art == L_EABF ? A_F_ALLE_ABF : A_F_ALLE_STR) : 0);
   } else {
     s_lzwei = true;
     for (int s = 0; s < S_N; s++) {
-      if (EINST[s].rub != art || (s == S_KONTRAST && s_layout != LAYOUT_PHOSPHOR)) continue;   // Papier hat nie Grau
+      if (EINST[s].rub != art || (s == S_KONTRAST && s_layout != LAYOUT_PHOSPHOR) || (s == S_INVERS && CARTOON)) continue;   // Papier hat nie Grau, Cartoon kein Invertiert
       wert_text(s, einst_wert(s), w, sizeof(w));
-      snprintf(buf, sizeof(buf), "%s|%s", T(EINST[s].name, EINST[s].namek), w);
+      snprintf(buf, sizeof(buf), "%s|%s", TV(EINST[s].name, EINST[s].namek), w);
       if (s == sel) k = s_lanz;
       s_lwert[s_lanz] = s;
       eintrag(buf, A_EINST_S);
@@ -2258,15 +2657,14 @@ static void rubrik_zeigen(int art, int sel) {          // eine Rubrik; sel: Eins
   }
   liste_fertig(k);
 }
-static int s_lset;                 // Einstellung der offenen Werteliste
 static void werte_zeigen(int s) {
   char buf[LTXT];
   const Einst *e = &EINST[s];
   const int v = einst_wert(s);
-  int k = 1;
+  int k = e->erkl ? 1 : 0;
   s_lset = s;
-  liste_beginnen(L_WERTE, T(e->name, e->namek));
-  eintrag(T(e->erkl, e->erklk), 0);                   // Erklärzeile, nicht wählbar
+  liste_beginnen(L_WERTE, TV(e->name, e->namek));
+  if (e->erkl) eintrag(TV(e->erkl, e->erklk), 0);      // Erklärzeile, nicht wählbar (Umschalter haben keine, 0.16.0)
   for (int i = 0; i < e->n; i++) {
     const int w = e->w[i];
     const bool eigen = s == S_OHNE && w == EIGEN, akt = eigen ? (v > 0 && v != 5) : w == v;   // eigene Angabe: n ≠ 5
@@ -2292,8 +2690,8 @@ static void aktion_senden(int aktion, int wahl) {      // mit Antwort vom Handy:
 
 static void layout_setzen(int v) {
   const int b = v & 7;
-  s_layout = (b == 2 || b == 4) ? LAYOUT_PHOSPHOR : LAYOUT_PAPIER;   // Phosphor grün -> weiß; LED, Klar, Signal -> Papier
-  s_invers = b != 0 && b != 3 && (v & LW_INVERS);      // LED invertiert war dunkel auf hell, also Klar normal
+  s_layout = (b == 2 || b == 4) ? LAYOUT_PHOSPHOR : b == 7 ? LAYOUT_CARTOON : LAYOUT_PAPIER;   // grün -> weiß; LED, Klar, Signal -> Papier
+  s_invers = b != 0 && b != 3 && (v & LW_INVERS);      // LED invertiert war dunkel auf hell; Cartoon zeigt es nicht, behält es
   s_kontrast = (v & LW_KONTRAST) != 0;
   farben_setzen();
   persist_write_int(PK_LAYOUT, layout_wert());
@@ -2350,7 +2748,7 @@ static void einst_setzen(int s, int v) {
     case S_ANSICHT: case S_INVERS: case S_KONTRAST: {
       int w = layout_wert();
       const int bit = s == S_INVERS ? LW_INVERS : LW_KONTRAST;
-      if (s == S_ANSICHT) w = (w & LW_SCHALTER) | (v == LAYOUT_PHOSPHOR ? 4 : 5);
+      if (s == S_ANSICHT) w = (w & LW_SCHALTER) | (v == LAYOUT_PHOSPHOR ? 4 : v == LAYOUT_CARTOON ? 7 : 5);
       else w = v ? (w | bit) : (w & ~bit);
       layout_setzen(w);
       aktion_abschicken(A_LAYOUT, layout_wert());
@@ -2369,16 +2767,22 @@ static void einst_setzen(int s, int v) {
       aktion_abschicken(A_AKTU, aktu_wert());
   }
 }
-static void einst_waehlen(int s) {                     // Select auf eine Einstellung
-  const Einst *e = &EINST[s];
-  if (e->n != 2) { werte_zeigen(s); return; }
-  einst_setzen(s, einst_wert(s) == e->w[0] ? e->w[1] : e->w[0]);
-  rubrik_zeigen(e->rub, s);
-}
+// 0.16.0 (Seb 2026-10-16): jede Einstellung öffnet ihre Werteliste, auch bei zwei Werten (bis 0.15.0 schalteten die direkt
+// um, die übrigen kehrten nach der Wahl in die Rubrik zurück). Select übernimmt den Wert sofort, die Liste bleibt offen —
+// gezeichnet schon in der neuen Ansicht, der Kreis rechts steht auf dem neuen Wert. Zurück führt in die Rubrik.
+static void einst_waehlen(int s) { werte_zeigen(s); }   // Select auf eine Einstellung
 static void wert_waehlen(int v) {                      // in der Werteliste gewählt
   if (s_lset == S_OHNE && v == EIGEN) { zahl_zeigen(); return; }
   einst_setzen(s_lset, v);
-  rubrik_zeigen(EINST[s_lset].rub, s_lset);
+  werte_zeigen(s_lset);
+}
+// Heimathaltestelle (0.16.0): gewählt wird sie im Menü einer Haltestelle; hier steht sie mit „keine“ zum Löschen
+static void heim_werte_zeigen(void) {
+  liste_beginnen(L_HEIM, T("HEIMATHALTESTELLE", "Heimathaltestelle"));
+  eintrag(T("-- WAEHLEN IM MENUE EINER HALTESTELLE --", "-- Wählen im Menü einer Haltestelle --"), 0);
+  if (s_heim[0][0]) eintrag(heim_name(), 0);
+  eintrag(T("KEINE", "keine"), A_HEIM_WEG);
+  liste_fertig(1);
 }
 
 // ---------- Suche: Buchstabenrad und Diktat (0.6.1) ----------
@@ -2641,8 +3045,8 @@ static void liste_waehlen(void) {
     aktion_senden(A_WAHL, s_lsel);
     return;
   }
-  if (s_lart == L_ZAHL) {                              // OHNE TASTE, eigene Angabe: Eintrag k = k Minuten
-    if (s_lsel > 0) { einst_setzen(S_OHNE, s_lsel); rubrik_zeigen(L_AKTU, S_OHNE); }
+  if (s_lart == L_ZAHL) {                              // OHNE TASTE, eigene Angabe: Eintrag k = k Minuten; Liste bleibt (0.16.0)
+    if (s_lsel > 0) { const int k = s_lsel, o = s_loben; einst_setzen(S_OHNE, k); zahl_zeigen(); s_loben = o; layer_mark_dirty(s_layer); }
     return;
   }
   const int a = s_lakt[s_lsel];
@@ -2677,6 +3081,18 @@ static void liste_waehlen(void) {
       break;
     }
     case A_F_BEENDEN: frage_zeigen(T("FAHRT", "Fahrt"), T("FAHRT BEENDEN", "Fahrt beenden"), A_FAHRT_ENDE, 0); break;
+    case A_HEIM_SEITE: case A_HEIM_WEG: {              // Heimat setzen (ersetzt sie eine andere: Bestätigung) bzw. löschen
+      char frage[2 * NAMELEN + 16];
+      if (!s_heim[0][0]) { if (a == A_HEIM_SEITE) aktion_senden(A_HEIM, seite); break; }
+      if (a == A_HEIM_WEG) snprintf(frage, sizeof(frage), "%s%s", T("LOESCHEN: ", "Löschen: "), heim_name());
+      else {
+        bit_name(buf, sizeof(buf), "", aktuelle()->name[0], aktuelle()->klar[0]);
+        snprintf(frage, sizeof(frage), T("HEIMAT: %s STATT %s", "Heimat: %s statt %s"), buf, heim_name());
+      }
+      frage_zeigen(T("HEIMATHALTESTELLE", "Heimathaltestelle"), frage, A_HEIM, a == A_HEIM_WEG ? -1 : seite);
+      break;
+    }
+    case A_HEIM_E: heim_werte_zeigen(); break;
     case A_F_ALLE_ABF: alle_text(buf, sizeof(buf), s_anzahl); frage_zeigen(T("ABFAHRTEN", "Abfahrten"), buf, A_ALLE_LOESCHEN, 0); break;
     case A_F_ALLE_STR: alle_text(buf, sizeof(buf), s_ranzahl); frage_zeigen(T("STRECKEN", "Strecken"), buf, A_ALLE_LOESCHEN, 1); break;
     case A_FAVORITEN: s_aus_einst = true; aktion_senden(A_FAVORITEN, 0); break;
@@ -2911,6 +3327,10 @@ static void empfangen(DictionaryIterator *it, void *ctx) {
   if ((t = dict_find(it, MESSAGE_KEY_H_FAV))) s_hfav = t->value->int32;   // welche Orte schon Favorit sind (0.8.0)
   if ((t = dict_find(it, MESSAGE_KEY_R_FAV))) s_rfav = t->value->int32;
   if ((t = dict_find(it, MESSAGE_KEY_S_FAV))) s_sfav = t->value->int32;
+  if ((t = dict_find(it, MESSAGE_KEY_HEIM_N))) {       // Heimathaltestelle (0.16.0), leer = keine
+    text_kopieren(s_heim[0], NAMELEN, t);
+    text_kopieren(s_heim[1], NAMELEN, dict_find(it, MESSAGE_KEY_HEIM_K));
+  }
   if ((t = dict_find(it, MESSAGE_KEY_FAHRT))) { fahrt_empfangen(it, t->value->int32); layer_mark_dirty(s_layer); return; }
   if ((t = dict_find(it, MESSAGE_KEY_K_PHASE))) { if (s_fahrt) karte_empfangen(it, t->value->int32); layer_mark_dirty(s_layer); return; }
   if (menue_empfangen(it)) { layer_mark_dirty(s_layer); return; }
@@ -2983,7 +3403,9 @@ static void empfangen(DictionaryIterator *it, void *ctx) {
       text_kopieren(s->steig[j], STEIGLEN, dict_find(it, MESSAGE_KEY_AB_S + j));
       text_kopieren(s->end[j], NAMELEN, dict_find(it, MESSAGE_KEY_AB_Z + j));
       text_kopieren(s->endk[j], NAMELEN, dict_find(it, MESSAGE_KEY_AB_ZK + j));
+      if ((x = dict_find(it, MESSAGE_KEY_AB_H + j))) { s->heim[j] = x->value->int32 & 3; s->mi[j] = x->value->int32 >> 2; }
     }
+    if ((t = dict_find(it, MESSAGE_KEY_HEIM_S))) s->ist_heim = t->value->int32 != 0;
     if ((t = dict_find(it, MESSAGE_KEY_STAND))) s->stand = t->value->int32;
     text_kopieren(s->quelle, sizeof(s->quelle), dict_find(it, MESSAGE_KEY_QUELLE));
     vorschlag_empfangen(it, 0, i);
@@ -3095,6 +3517,7 @@ static void zurueck(void) {
         case L_ANZEIGE: case L_AKTU: case L_EABF: case L_ESTR: case L_SUCHE: case L_DATEN: einstellungen_zeigen(s_lart); break;
         case L_WERTE: rubrik_zeigen(EINST[s_lset].rub, s_lset); break;
         case L_ZAHL: werte_zeigen(S_OHNE); break;
+        case L_HEIM: rubrik_zeigen(L_EABF, -1); break;
         case L_MENUE: menue_verlassen(); break;
         case L_DMENUE: details_wieder(); break;
         default: aktion_senden(A_ZURUECK, 0);
@@ -3198,10 +3621,6 @@ static void window_load(Window *w) {
   layer_set_update_proc(s_layer, zeichnen);
   layer_add_child(root, s_layer);
   schriften_setzen();
-  s_f14b = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
-  s_f18b = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
-  s_f24b = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
-  s_f28b = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
   touch_service_subscribe(beruehrt, NULL);
 }
 
@@ -3264,6 +3683,7 @@ static void deinit(void) {
   if (s_ruhe) app_timer_cancel(s_ruhe);
   if (s_ab_timer) app_timer_cancel(s_ab_timer);
   if (s_halt_timer) app_timer_cancel(s_halt_timer);
+  if (s_cart_timer) app_timer_cancel(s_cart_timer);
   if (s_diktat) dictation_session_destroy(s_diktat);
   tick_timer_service_unsubscribe();
   window_destroy(s_window);

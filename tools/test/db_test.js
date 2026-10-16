@@ -19,7 +19,7 @@ function entfernung(a, b, c, d) {
   var r = Math.PI / 180, x = (d - b) * r * Math.cos((a + c) / 2 * r), y = (c - a) * r;
   return Math.sqrt(x * x + y * y) * 6371000;
 }
-var speicher = {};
+var speicher = { startseite: '0' };
 var db = DB({ schluessel: function () { return { id: dbId, key: dbKey }; }, deZuUtc: deZuUtc, entfernung: entfernung,
               bahnhoefe: require('../../src/pkjs/db_bahnhoefe.json').b,
               speicher: { getItem: function (k) { return speicher[k] === undefined ? null : speicher[k]; }, setItem: function (k, v) { speicher[k] = String(v); } } });

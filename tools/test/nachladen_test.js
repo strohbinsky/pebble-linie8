@@ -42,7 +42,7 @@ FakeXHR.prototype.send = function () {
     if (self.onload) self.onload();
   }, 2);
 };
-var speicher = { layout: 'papier', quelle: 'trans' }, lauscher = {}, gesendet = [];
+var speicher = { layout: 'papier', quelle: 'trans', startseite: '0' }, lauscher = {}, gesendet = [];
 var ctx = {
   Pebble: { addEventListener: function (t, f) { lauscher[t] = f; }, sendAppMessage: function (m, ok) { gesendet.push(lesbar(m)); setTimeout(ok, 1); }, openURL: function () {} },
   localStorage: { getItem: function (k) { return speicher[k] === undefined ? null : speicher[k]; }, setItem: function (k, v) { speicher[k] = String(v); } },

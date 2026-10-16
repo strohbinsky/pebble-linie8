@@ -124,6 +124,27 @@ function Logik(holenRoh, schrift) {
   // mehreren Datenquellen). Zusammengefasst nach Namen, je Haltestelle der nächste Steig, nach Entfernung.
   function namensSchluessel(n) { return String(n).replace(/,/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase(); }
 
+  // ---------- Heimathaltestelle (0.16.0) ----------
+  // Hält eine Abfahrt nach ihrem Start noch an der Heimathaltestelle (2) oder irgendwo in deren Umkreis (1)?
+  // Heimat = gleicher Name oder bis GENAU_M, wie Start und Ziel überall in der App. halte: Folgehalte ab dem nächsten
+  // (RMV passlist, Transitous fetchStops). Am Start selbst nichts. Liegt der Start schon im Umkreis, nur die 2 —
+  // sonst trüge dort jede Abfahrt das schwache Zeichen.
+  function hatOrt(x) { return x && typeof x.lat === 'number' && typeof x.lon === 'number'; }
+  function istHeim(h, x) {
+    if (!h || !x) return false;
+    if (x.name && namensSchluessel(x.name) === namensSchluessel(h.name)) return true;
+    return hatOrt(h) && hatOrt(x) && entfernung(h.lat, h.lon, x.lat, x.lon) <= GENAU_M;
+  }
+  function heimMarke(h, start, halte, radius) {
+    if (!h || !halte || !halte.length || istHeim(h, start)) return 0;
+    var nah = hatOrt(h) && hatOrt(start) && entfernung(h.lat, h.lon, start.lat, start.lon) <= radius, m = 0;
+    for (var i = 0; i < halte.length; i++) {
+      if (istHeim(h, halte[i])) return 2;
+      if (!m && !nah && hatOrt(h) && hatOrt(halte[i]) && entfernung(h.lat, h.lon, halte[i].lat, halte[i].lon) <= radius) m = 1;
+    }
+    return m;
+  }
+
   function haltestellenUm(lat, lon, radius, fertig) {
     var dlat = radius / 111320, dlon = radius / (111320 * Math.cos(lat * Math.PI / 180));
     holen('v1/map/stops?min=' + (lat - dlat).toFixed(6) + ',' + (lon - dlon).toFixed(6) +
@@ -561,7 +582,7 @@ function Logik(holenRoh, schrift) {
     seiteNachOrt: seiteNachOrt,
     COLS: COLS, UMKREIS_B: UMKREIS_B, GENAU_R: GENAU_R, UMKREISE: UMKREISE, schneller: schneller, standortNah: standortNah, gehSek: gehSek,
     sortDe: sortDe, entfernung: entfernung, ledText: ledText, breite: breite, stadtVon: stadtVon, kurzname: kurzname,
-    klarname: klarname, utf8Kuerzen: utf8Kuerzen, oepnv: oepnv,
+    klarname: klarname, utf8Kuerzen: utf8Kuerzen, oepnv: oepnv, istHeim: istHeim, heimMarke: heimMarke,
     haltestellenUm: haltestellenUm, naechsteHaltestellen: naechsteHaltestellen,
     erreichbar: erreichbar, erreichbarUm: erreichbarUm, einstiegeUm: einstiegeUm, zieleHin: zieleHin, richtungen: richtungen, direkt: direkt, ankunftUm: ankunftUm, rueckKandidaten: rueckKandidaten
   };

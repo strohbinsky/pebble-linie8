@@ -8,15 +8,19 @@ RMV und der DB. Das Handy kann in der Tasche bleiben.
 Angefangen hat die App als Anzeige für die Buslinie 8 in Wiesbaden. Fahrpläne kommen heute deutschlandweit über
 Transitous, Echtzeit im Rhein-Main-Gebiet vom RMV und für Züge bundesweit von der DB.
 
-> **Beta, Version 0.13.0.** Geprüft mit Tests gegen Live-Daten und im Emulator. Der Alltagstest auf der Uhr läuft
+> **Beta, Version 0.17.0.** Geprüft mit Tests gegen Live-Daten und im Emulator. Der Alltagstest auf der Uhr läuft
 > noch.
 
-![Ansichten](bilder/ansichten-0130.png)
+![Ansichten](bilder/ansichten-0170.png)
 
-*Abfahrten am Hauptbahnhof in den beiden Ansichten Papier und Phosphor, jeweils normal und invertiert.*
+*Abfahrten am Hauptbahnhof in den drei Ansichten Cartoon (Standard), Papier und Phosphor.*
 
 ## Was sie kann
 
+- **Startseite** *(neu)*: beim Öffnen die nächste Haltestelle mit ihren Abfahrten, Hoch führt zu den Abfahrten,
+  Runter zu den Strecken
+- **Heimathaltestelle** *(neu)*: ein Haus an jeder Abfahrt, die später dort hält, ein leeres Haus, wenn sie nur in
+  der Nähe vorbeikommt
 - **Abfahrten**: deine Haltestellen mit den nächsten Abfahrten, Steig und Restminuten. Mit Ausstieg nur die
   Fahrten, die wirklich dorthin fahren, samt Ankunftszeit
 - **Strecken**: vom Standort oder einem Favoriten zum Ziel, mit Umstiegen und Fußwegen. Die App zeigt, wann du
@@ -34,10 +38,35 @@ Transitous, Echtzeit im Rhein-Main-Gebiet vom RMV und für Züge bundesweit von 
 - **Spontan**: Abfahrten und Strecken ab dem Standort, ohne vorher etwas anzulegen
 - **Rückfahrt** mit einem Klick, **20 Favoriten**, Suche an der Uhr per Haltestelle A–Z oder Diktat
 - **Echtzeit**: Verspätungen, Ausfälle, Steig vom RMV, für Züge bundesweit von der **Deutschen Bahn**. Ohne Schlüssel läuft die App mit dem Fahrplan
-- **Zwei Ansichten**: Papier (fette Systemschrift, Standard) und Phosphor (Pixelschrift), jeweils auch invertiert,
-  Phosphor zusätzlich mit hohem Kontrast
+- **Drei Ansichten**: **Cartoon** *(neu, Standard)* — jede Abfahrt eine Straße oder ein Gleis, Bus, Tram oder Zug
+  fährt ins Bild; Papier (fette Systemschrift) und Phosphor (Pixelschrift), beide auch invertiert, Phosphor
+  zusätzlich mit hohem Kontrast
+- **Aktualisieren** *(neu)*: regelmäßig, nach jeder Abfahrt, und wie lange ohne Tastendruck
 - **Lange Namen** laufen überall durch, statt abgeschnitten zu werden
-- **Alles an der Uhr einstellbar**, oder bequemer in der Pebble-App am Handy
+- **Alles an der Uhr einstellbar**, nach Rubriken geordnet, oder bequemer in der Pebble-App am Handy
+
+## Ansicht Cartoon
+
+![Cartoon](bilder/cartoon-0170.png)
+
+*Abfahrten am Hauptbahnhof und am Kurhaus, Startseite, Fahrt im Bus mit 12 und 3 Minuten bis zum Ausstieg.*
+
+- Jede Abfahrt bekommt eine Straße (Bus) oder ein Gleis (Tram mit Gelenk und Stromabnehmer, Zug länger, Schild `Gl`)
+- Das Fahrzeug fährt bei 10 Minuten links ins Bild. Seine Front erreicht den Mast genau in dem Moment, in dem die Uhr
+  auf die Abfahrtszeit springt
+- **Verspätung**: Der Bus schwitzt und zieht ein Gewicht mit `+2`. **Ausfall**: Panne mit Rauch, die Zeit ist
+  durchgestrichen
+- **In der Fahrt**: der Ausstieg groß, die Minuten auf einer Tafel. Ab 5 Minuten fährt das Fahrzeug auf den Ausstieg
+  zu, die letzten Halte stehen an der Straße. In der letzten Minute steht `JETZT RAUS!` da und die Uhr vibriert
+- Neu gezeichnet wird alle 5 Sekunden
+
+## Papier und Phosphor
+
+![Papier](bilder/papier-0170.png)
+
+![Phosphor](bilder/phosphor-0170.png)
+
+*Abfahrten am Kurhaus, Startseite und Fahrt im Bus, oben Papier, unten Phosphor.*
 
 ## Unterwegs
 
@@ -114,6 +143,7 @@ Code, Kommentare und Bezeichner sind deutsch. Auf der Uhr läuft C, auf dem Hand
 - [DB Timetables](https://developers.deutschebahn.com): Echtzeit für Züge
 - [db-stations](https://github.com/derhuerst/db-stations): Bahnhofsliste, CC BY 4.0
 - Roboto (Apache 2.0) für die Ziffern der Ansicht Papier
+- [Fredoka](https://github.com/hafontia/Fredoka-One) (SIL Open Font License) für die Ansicht Cartoon
 - Pebble SDK und Pebble-App von Core Devices und Rebble
 
 Gemacht von **Seb & Claude** (Anthropic): Ideen, Entscheidungen und Alltagstest von Seb, Code, Tests und

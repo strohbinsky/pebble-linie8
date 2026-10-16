@@ -14,7 +14,7 @@ paket.pebble.messageKeys.forEach(function (k) {
   nr += n;
 });
 
-var speicher = { layout: 'phosphor' };   // Großbuchstaben-Texte wie bisher (Standard seit 0.12.0: Klar)
+var speicher = { layout: 'phosphor', startseite: '0' };   // Startseite seit 0.17.0 Standard an; Großbuchstaben-Texte wie bisher (Standard seit 0.12.0: Klar)
 var localStorage = { getItem: function (k) { return speicher[k] === undefined ? null : speicher[k]; }, setItem: function (k, v) { speicher[k] = String(v); } };
 var schluessel = path.join(os.homedir(), '.config/rmv/accessId');
 if (process.env.RMV !== '0' && fs.existsSync(schluessel)) speicher.rmvKey = fs.readFileSync(schluessel, 'utf8').trim();

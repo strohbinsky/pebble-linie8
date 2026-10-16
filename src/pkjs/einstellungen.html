@@ -61,7 +61,7 @@ var e = null;                      // Entwurf der Seite im Editor
 var rmvKey = (ZUSTAND && ZUSTAND.rmvKey) || '';
 var rmvTest = '';
 var dbId = (ZUSTAND && ZUSTAND.dbId) || '', dbKey = (ZUSTAND && ZUSTAND.dbKey) || '', dbTest = '';   // DB Timetables (0.9.0)
-function layoutWahl(v) { return v === 'phosphor' || v === 'phosphor_weiss' ? 'phosphor_weiss' : 'papier'; }   // Papier, Phosphor (Signal bis 0.14.0)
+function layoutWahl(v) { return v === 'phosphor' || v === 'phosphor_weiss' ? 'phosphor_weiss' : v === 'cartoon' ? 'cartoon' : 'papier'; }   // Papier, Phosphor, Cartoon (0.16.0; Signal bis 0.14.0)
 var layout = layoutWahl(ZUSTAND && ZUSTAND.layout);   // Ansicht auf der Uhr
 var inversWert = !!(ZUSTAND && ZUSTAND.invers), kontrastWert = !!(ZUSTAND && ZUSTAND.kontrast);   // Farben (0.9.1)
 // Startseite und Aktualisieren (0.15.0); ohneWert: -1 nach 10 s schließen, 0 immer weiter laden, 1–60 Minuten
@@ -71,6 +71,7 @@ var nachAbfahrtWert = !(ZUSTAND && ZUSTAND.nachAbfahrt === false);
 var ohneWert = (ZUSTAND && typeof ZUSTAND.ohneTaste === 'number' && ZUSTAND.ohneTaste >= -1 && ZUSTAND.ohneTaste <= 60) ? ZUSTAND.ohneTaste : 5;
 var eigenMin = ohneWert > 0 && ohneWert !== 5 ? ohneWert : 10;   // Zahlenfeld „nach … min“
 var fahrtlog = (ZUSTAND && ZUSTAND.fahrtlog) || [], fahrtlogLoeschen = false;
+var heimName = (ZUSTAND && ZUSTAND.heim && ZUSTAND.heim.name) || '', heimLoeschen = false;   // Heimathaltestelle (0.16.0)
 var umkreisWert = L.UMKREISE.indexOf(ZUSTAND && ZUSTAND.umkreis) >= 0 ? ZUSTAND.umkreis : 1000;   // Umkreis um den Start
 var abfahrtWert = (ZUSTAND && ZUSTAND.abfahrt) === 'aktuell' ? 'aktuell' : 'plan';   // Abfahrtszeit auf der Uhr
 var dauerWert = (ZUSTAND && ZUSTAND.dauer) === 'aus' ? 'aus' : 'an';                // Fahrtdauer auf der Uhr
@@ -124,7 +125,7 @@ var UNTERSEITEN = [['haltestellen', 'Abfahrten'], ['strecken', 'Strecken'], ['fa
                    ['protokoll', 'Fahrtprotokoll']];
 function daten() {
   return { strecken: strecken, rmvKey: rmvKey, dbId: dbId, dbKey: dbKey, layout: layout, invers: inversWert, kontrast: kontrastWert, umkreis: umkreisWert, quelle: quelleWert, abfahrt: abfahrtWert, dauer: dauerWert,
-           startseite: startseiteWert, regel: regelWert, nachAbfahrt: nachAbfahrtWert, ohneTaste: ohneWert, fahrtlogLoeschen: fahrtlogLoeschen,
+           startseite: startseiteWert, regel: regelWert, nachAbfahrt: nachAbfahrtWert, ohneTaste: ohneWert, fahrtlogLoeschen: fahrtlogLoeschen, heimLoeschen: heimLoeschen,
            routen: routen, favoriten: favoriten, umstiege: umstiegeWert, fussweg: fusswegWert, umstzeit: umstzeitWert };
 }
 function ohneText(v) { return v < 0 ? 'nach 10 s schließen' : v === 0 ? 'immer weiter laden' : 'nach ' + v + ' min nicht mehr laden'; }
@@ -146,7 +147,7 @@ function namenFokus(i) {                 // neuer Favorit: gleich den Namen eint
 function hauptHtml() {
   var kurz = {
     haltestellen: strecken.length + ' von ' + MAXS, strecken: routen.length + ' von ' + MAXR, favoriten: favoriten.length + ' von ' + MAXF,
-    anzeige: (startseiteWert ? 'Startseite, ' : '') + { phosphor_weiss: 'Phosphor', papier: 'Papier' }[layout] + (inversWert ? ', invertiert' : '') + (kontrastWert && layout === 'phosphor_weiss' ? ', hoher Kontrast' : '') + (abfahrtWert === 'aktuell' ? ', Zeit aktuell' : ''),
+    anzeige: (startseiteWert ? 'Startseite, ' : '') + { phosphor_weiss: 'Phosphor', papier: 'Papier', cartoon: 'Cartoon' }[layout] + (inversWert && layout !== 'cartoon' ? ', invertiert' : '') + (kontrastWert && layout === 'phosphor_weiss' ? ', hoher Kontrast' : '') + (abfahrtWert === 'aktuell' ? ', Zeit aktuell' : ''),
     aktualisieren: regelText(regelWert) + (nachAbfahrtWert ? ', nach Abfahrt' : '') + ', ohne Taste ' + ohneText(ohneWert),
     suche: 'Umkreis ' + kmText(umkreisWert) + ', ' + (umstiegeWert === 9 ? 'Umstiege beliebig' : 'höchstens ' + umstiegeWert + ' Umstiege') + ', ' + fusswegWert + ' min Fußweg',
     daten: { auto: 'Auto', rmv: 'nur RMV', trans: 'nur Transitous' }[quelleWert] + (rmvKey ? ' mit RMV-Schlüssel' : ' ohne RMV-Schlüssel') + (dbId && dbKey ? ', DB für Züge' : ''),
@@ -207,6 +208,10 @@ function haltestellenHtml() {
   var h = '<div class="klein"><b>Du weißt, wie du fährst. Die App sagt dir, wann.</b> ' +
     'Abfahrten ab einer Haltestelle, ohne Umstieg — mit Ausstieg samt Ankunft und Fahrtdauer, ohne Ausstieg mit dem Endziel jeder Fahrt. ' +
     'Die Rückfahrt legst du an der Uhr an: Select lang → Rückfahrt.</div>';
+  h += '<div class="karte"><b>Heimathaltestelle</b><br><span class="klein">' + (heimName && !heimLoeschen ? esc(heimName) :
+    heimName ? 'wird beim Speichern gelöscht' : 'keine') + '<br>Abfahrten, die später dort halten, tragen an der Uhr ein volles Haus, die in ihrem Umkreis ein leeres. ' +
+    'Festlegen an der Uhr: Select lang auf einer Haltestelle → Heimathaltestelle.</span>' +
+    (heimName && !heimLoeschen ? '<br>' + loeschKnopf('heim', 'Heimathaltestelle löschen?') : '') + '</div>';
   if (!strecken.length) h += '<div class="klein">Noch keine Abfahrt angelegt.</div>';
   strecken.forEach(function (s, i) {
     h += '<div class="karte"><b>' + esc(s.a.kurz) + (s.b ? ' → ' + esc(s.b.kurz) : '') + '</b><br>' +
@@ -229,8 +234,9 @@ function anzeigeHtml() {
   return '<h3>Startseite</h3>' +
     schalter('startseite', 'Startseite', 'Beim Öffnen die Abfahrten der nächsten Haltestelle. Hoch führt zu Abfahrten, Runter zu Strecken, Zurück auf einer Seite wieder zur Startseite. Ohne Standort öffnet die App wie bisher', startseiteWert) +
     '<h3>Ansicht</h3>' +
-    [['papier', 'Papier', 'Standard. Schwarz auf Weiß, fette Systemschrift, große Ziffern, Namen mit Umlauten — am besten lesbar'],
-     ['phosphor_weiss', 'Phosphor', 'Weiße Pixelschrift auf Schwarz wie das Watchface Phosphor']].map(function (v) {
+    [['papier', 'Papier', 'Schwarz auf Weiß, fette Systemschrift, große Ziffern, Namen mit Umlauten — am besten lesbar'],
+     ['phosphor_weiss', 'Phosphor', 'Weiße Pixelschrift auf Schwarz wie das Watchface Phosphor'],
+     ['cartoon', 'Cartoon', 'Standard. Bunt: jede Abfahrt eine Straße oder ein Gleis, Bus, Tram oder Zug fährt bei 10 min ins Bild und erreicht die Haltestelle zur Abfahrtsminute. Nicht invertierbar']].map(function (v) {
       return '<label class="zeile"><input type="radio" name="layout" data-a="layout" value="' + v[0] + '"' + (layout === v[0] ? ' checked' : '') + '>' +
         '<b>' + v[1] + '</b><br><span class="klein">' + v[2] + '</span></label>';
     }).join('') +
@@ -731,6 +737,7 @@ function schliessen(daten) {
 // „Ja“ einer Rückfrage (0.13.1): h<i> Abfahrt, r<i> Strecke, f<i> Favorit, alle-<rubrik>, e<i> Eintrag der Ersetzen-Liste
 function frageJa(k) {
   frage = '';
+  if (k === 'heim') { heimLoeschen = true; vormerken(); return zeigeListe(); }   // Heimathaltestelle (0.16.0)
   var i = parseInt(k.slice(1), 10);
   if (k.indexOf('alle-') === 0) {                     // Alle löschen (0.8.0), je Rubrik und Favoriten
     var art = k.slice(5), liste = art === 'strecken' ? routen : art === 'favoriten' ? favoriten : strecken;

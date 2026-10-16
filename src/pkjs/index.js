@@ -264,10 +264,13 @@ function holenRmv(von, nach, linien, fertig, max, ab) {
 // Je Fahrt zusätzlich das Endziel (z). "über …" liefert keine der beiden Quellen (geprüft 2026-10-09), daher nur das Endziel.
 var TAFEL_N = 60;      // so viele Abfahrten ansehen, bevor der Linienfilter greift (Hbf: 25 Linien)
 function tafelTransitous(von, linien, fertig, ab, max) {
-  transitousHolen('v5/stoptimes?stopId=' + encodeURIComponent(von.id) + '&n=' + TAFEL_N + (ab ? '&time=' + new Date(ab * 1000).toISOString() : ''), function (f, d) {
+  var mitHeim = !!heim();               // Heimathaltestelle (0.16.0): Folgehalte mitholen (Hbf 140 -> 500 KB, gleich schnell)
+  transitousHolen('v5/stoptimes?stopId=' + encodeURIComponent(von.id) + '&n=' + TAFEL_N + (mitHeim ? '&fetchStops=true' : '') +
+                  (ab ? '&time=' + new Date(ab * 1000).toISOString() : ''), function (f, d) {
     if (f) return fertig(f === 'kein Netz' ? STATUS_NETZ : STATUS_FEHLER);
     try {
       var liste = [], live = false;
+      var folge = function (x) { return (x.nextStops || []).filter(function (h) { return h.dropoffType !== 'NOT_ALLOWED'; }); };
       (d.stopTimes || []).forEach(function (x) {
         if (!L.oepnv(x)) return;                                   // keine Mitfahrbörse
         if (linien && linien.length && linien.indexOf(x.routeShortName) < 0) return;
@@ -279,7 +282,7 @@ function tafelTransitous(von, linien, fertig, ab, max) {
         var dl = (x.cancelled || x.tripCancelled || p.cancelled) ? AUSFALL : (x.realTime ? Math.round((t - plan) / 60) : 0);
         liste.push({ t: t, l: linienKurz(x.routeShortName), d: dl, zn: x.tripShortName || '', s: steigText(p.track || p.scheduledTrack), f: 0,
                      z: x.headsign || (x.tripTo && x.tripTo.name) || '', lv: x.routeShortName, r: x.headsign || '', tid: x.tripId,
-                     mi: StreckenM.verkehrsmittel(x.mode || ''), sp: steigText(p.scheduledTrack) });
+                     mi: StreckenM.verkehrsmittel(x.mode || ''), sp: steigText(p.scheduledTrack), h: mitHeim ? heimMarkeFuer(von, folge(x)) : 0 });
         live = live || !!x.realTime;
       });
       liste.sort(function (a, b) { return a.t - b.t; });
@@ -295,7 +298,9 @@ function tafelRmv(von, linien, fertig, ab, max) {
   rmvKennung(von, function (f1, a) {
     if (f1 !== null) return fertig(f1);
     var filter = (linien && linien.length) ? '&lines=' + encodeURIComponent(linien.join(',')) : '';
-    rmvGet('departureBoard?maxJourneys=30&duration=120' + filter + (ab ? rmvAb(ab) : '') + '&id=' + encodeURIComponent(a), function (f, d) {
+    // Heimathaltestelle (0.16.0): Folgehalte mitholen (passlist), dafür 12 statt 30 Fahrten — Hbf 290 statt 690 KB
+    var mitHeim = !!heim();
+    rmvGet('departureBoard?maxJourneys=' + (mitHeim ? '12&passlist=1' : '30') + '&duration=120' + filter + (ab ? rmvAb(ab) : '') + '&id=' + encodeURIComponent(a), function (f, d) {
       if (f !== null) return fertig(f);
       try {
         var liste = [], live = false;
@@ -308,7 +313,8 @@ function tafelRmv(von, linien, fertig, ab, max) {
           var steig = x.rtTrack || x.track || (x.rtPlatform && x.rtPlatform.text) || (x.platform && x.platform.text);
           liste.push({ t: t, l: linienKurz(name), d: x.cancelled ? AUSFALL : Math.round((t - plan) / 60), s: steigText(steig), f: 0,
                        z: x.direction || '', lv: name, r: x.direction || '', ref: x.JourneyDetailRef && x.JourneyDetailRef.ref,
-                       mi: StreckenM.verkehrsmittel((pr && pr.catOut) || ''), sp: steigText(x.track) });
+                       mi: StreckenM.verkehrsmittel((pr && pr.catOut) || ''), sp: steigText(x.track),
+                       h: mitHeim ? heimMarkeFuer(von, ((x.Stops && x.Stops.Stop) || []).slice(1)) : 0 });   // erster Halt = hier
           live = live || rt;
         });
         liste.sort(function (x, y) { return x.t - y.t; });
@@ -431,22 +437,51 @@ function umkreis() {
   var u = parseInt(localStorage.getItem('umkreis'), 10);
   return L.UMKREISE.indexOf(u) >= 0 ? u : 1000;
 }
+
+// Heimathaltestelle (0.16.0): gewählt im Uhr-Menü einer Haltestelle (HEIMATHALTESTELLE bzw. … AENDERN), gelöscht in
+// Einstellungen > Abfahrten. Abfahrten, die später dort halten, tragen an der Uhr ein volles Haus, die im Umkreis
+// (Einstellung UMKREIS) ein leeres — nur Seiten ohne Ziel (Abfahrten hier, Startseite, Seite ohne Ausstieg).
+function heim() {
+  try { var h = JSON.parse(localStorage.getItem('heim') || 'null'); return h && h.name ? h : null; } catch (e) { return null; }
+}
+function heimKennung() { var h = heim(); return h ? ortKennung(h) + '@' + umkreis() : ''; }   // Teil des Pufferschlüssels
+function heimFelder(m) {               // Name an die Uhr: Einstellungen, Menü (setzen oder ändern)
+  var h = heim(), stadt = h ? L.stadtVon(h.name) : '';
+  m[keys.HEIM_N] = h ? L.utf8Kuerzen(L.kurzname(h.name, stadt), 31) : '';
+  m[keys.HEIM_K] = h ? L.utf8Kuerzen(L.klarname(h.name, stadt), 31) : '';
+  return m;
+}
+function heimSchreiben(h) {
+  localStorage.setItem('heim', h ? JSON.stringify({ name: h.name, id: h.id || null, lat: h.lat, lon: h.lon }) : '');
+  console.log('Heimathaltestelle: ' + (h ? h.name : 'keine'));
+  senden(heimFelder({}));
+}
+// Uhr: A_HEIM mit der Seite (HIER = Abfahrten hier bzw. Startseite) — deren Haltestelle wird Heimat; -1 = löschen.
+// Danach zur Seite (die Uhr fragt sie neu an, der Pufferschlüssel enthält die Heimat: neu geholt, mit Zeichen).
+function heimWaehlen(w) {
+  if (w < 0) return heimSchreiben(null);
+  var h = w === HIER ? hierAktuell : (strecken()[w] || {}).a;
+  if (!h) return menueEnde(true);
+  h = halt(h);
+  koordinaten(h, function () { heimSchreiben(h); menueEnde(true); });   // ohne Koordinaten nur nach Namen
+}
+function heimMarkeFuer(von, halte) { return L.heimMarke(heim(), von, halte, umkreis()); }
 function umkreisText(m) { return m >= 1000 ? (m / 1000) + T('KM', ' km') : m + T('M', ' m'); }
 
 // Ansicht seit 0.13.0: 'papier' (Standard) oder 'phosphor_weiss', dazu unabhängig 'invers' (Papier dunkel, Phosphor hell)
 // und 'kontrast' (keine graue Schrift, nur Phosphor). Alte Werte: 'phosphor' (grün) wird Phosphor weiß; 'klar', 'led'
 // und 'invers' (LED invers als eigene Ansicht bis 0.9.0) werden Papier — LED-Stände dabei nicht invertiert. 'signal'
 // (0.14.0) wird seit 0.15.0 ebenfalls Papier. Phosphor nutzt die Großbuchstaben-Texte ohne Umlaute, Papier die normale.
-var LAYOUTS = ['led', 'klar', 'phosphor', 'invers', 'phosphor_weiss', 'papier'];   // Index = Wert in LAYOUT; gesendet nur 4 und 5
+var LAYOUTS = ['led', 'klar', 'phosphor', 'invers', 'phosphor_weiss', 'papier', 'signal', 'cartoon'];   // Index = Wert in LAYOUT; gesendet 4, 5, 7 (Cartoon, 0.16.0)
 function altLed() { var v = localStorage.getItem('layout'); return v === 'led' || v === 'invers'; }
-function layout() { var v = localStorage.getItem('layout'); return v === 'phosphor' || v === 'phosphor_weiss' ? 'phosphor_weiss' : 'papier'; }
+function layout() { var v = localStorage.getItem('layout'); return v === 'phosphor' || v === 'phosphor_weiss' ? 'phosphor_weiss' : v === 'cartoon' || v === null ? 'cartoon' : 'papier'; }   // ohne Wahl: Cartoon (0.17.0)
 function invers() { return !altLed() && localStorage.getItem('invers') === '1'; }
 function kontrast() { return localStorage.getItem('kontrast') === '1'; }
 // LAYOUT an der Uhr: Grundansicht + 8 invertiert + 16 hoher Kontrast (+ 32 App schließen bis 0.14.0, seit 0.15.0 in AKTU)
 function layoutWert() { return LAYOUTS.indexOf(layout()) | (invers() ? 8 : 0) | (kontrast() ? 16 : 0); }
 function layoutMerken(w) {
   var b = w & 7, led = b === 0 || b === 3;
-  localStorage.setItem('layout', b === 2 || b === 4 ? 'phosphor_weiss' : 'papier');
+  localStorage.setItem('layout', b === 2 || b === 4 ? 'phosphor_weiss' : b === 7 ? 'cartoon' : 'papier');
   localStorage.setItem('invers', !led && (w & 8) ? '1' : '0');
   localStorage.setItem('kontrast', w & 16 ? '1' : '0');
 }
@@ -456,7 +491,7 @@ function layoutMerken(w) {
 // ohneTaste: -1 nach 10 s schließen, 0 immer weiter laden, 1–60 nach so vielen Minuten nicht mehr laden (Standard 5).
 // Bis 0.14.0 gab es nur den Schalter 'schliessen' (= ohneTaste -1); er wird beim ersten Lesen übernommen.
 var REGEL = [1, 2, 5, 0];
-function startseite() { return localStorage.getItem('startseite') === '1'; }
+function startseite() { return localStorage.getItem('startseite') !== '0'; }   // Standard an seit 0.17.0
 function regel() { var v = parseInt(localStorage.getItem('regel'), 10); return REGEL.indexOf(v) >= 0 ? v : 1; }
 function nachAbfahrt() { return localStorage.getItem('nachAbfahrt') !== '0'; }
 function ohneTaste() {
@@ -509,6 +544,7 @@ function einrichtungSenden() {
   msg[keys.ABFAHRT] = abfahrt() === 'aktuell' ? 1 : 0;
   msg[keys.DAUER] = dauer() === 'an' ? 1 : 0;
   msg[keys.AKTU] = aktuWert();
+  heimFelder(msg);
   for (var i = 0; i < liste.length && i < MAXS; i++) {
     var b = liste[i].b, stadt = L.stadtVon(liste[i].a.name);
     msg[keys.NAME_A + i] = liste[i].a.kurz;
@@ -525,6 +561,7 @@ function einrichtungSenden() {
 // An die Uhr nur noch kommende (0.15.0, wie naechste() auf der Uhr: Abfahrt ab jetzt). Geholt und gepuffert werden mehr
 // (SEITE_N), damit nach einer Abfahrt gleich wieder drei dastehen. Die Nummer der Details zählt in dieser Liste.
 var SEITE_N = MAXD + 3;
+var MITTEL_NR = { TRAM: 1, ZUG: 2, FAEHRE: 3 };   // 0.17.0, Bus = 0
 function kommende(fahrten) { var j = jetztS(); return (fahrten || []).filter(function (x) { return x.t >= j; }); }
 function seiteNachricht(st, erg) {
   var stadt = L.stadtVon(st.a.name), msg = {}, fahrten = kommende(erg.fahrten);
@@ -537,6 +574,8 @@ function seiteNachricht(st, erg) {
       msg[keys.AB_F + j] = x ? (x.f || 0) : 0;
       msg[keys.AB_Z + j] = x && x.z ? L.utf8Kuerzen(L.kurzname(x.z, stadt), 31) : '';
       msg[keys.AB_ZK + j] = x && x.z ? L.utf8Kuerzen(L.klarname(x.z, stadt), 31) : '';
+      msg[keys.AB_H + j] = x ? (x.h || 0) | (MITTEL_NR[x.mi] || 0) << 2 : 0;   // Heimat (0.16.0): 2 hält dort, 1 im Umkreis;
+                                                          // Bit 2–3 Verkehrsmittel für Cartoon (0.17.0)
     }
     msg[keys.STATUS] = erg.live ? STATUS_LIVE : STATUS_SOLL;
     return msg;
@@ -585,7 +624,7 @@ function pufferSchreiben(k, daten) {
   catch (e) { console.log('Puffer nicht gespeichert: ' + e); try { localStorage.setItem('puffer', '{}'); } catch (e2) {} }
 }
 function ortKennung(o) { return o ? (o.id || (o.lat !== undefined ? o.lat.toFixed(4) + ',' + o.lon.toFixed(4) : o.name)) : ''; }
-function pufferHalt(st) { return ['H', quelle() + (dbSchluessel() ? '+db' : ''), ortKennung(st.a), ortKennung(st.b), (linienFuer(st) || []).join(',')].join('|'); }
+function pufferHalt(st) { return ['H', quelle() + (dbSchluessel() ? '+db' : ''), ortKennung(st.a), ortKennung(st.b), (linienFuer(st) || []).join(','), st.b ? '' : heimKennung()].join('|'); }
 
 function streckeLaden(i, detail, neu) {
   var st = strecken()[i];
@@ -607,6 +646,7 @@ function abfahrtenLaden(st, i, extra, kanal, detail, opt) {
     msg[keys.RUBRIK] = 0;
     msg[keys.QUELLE] = quelleText(quelle, erg && erg.db);
     msg[keys.STAND] = stand || jetztS();
+    msg[keys.HEIM_S] = L.istHeim(heim(), st.a) ? 1 : 0;   // Haltestelle der Seite ist die Heimat: Menüeintrag fehlt (0.16.0)
     if (kanal === 'seite') msg[keys.V_TEXT] = vorschlagText(0, i, pk);
     senden(msg);
     if (erg && kanal === 'seite' && st.b) vorschlagPruefen(0, i, pk, st.a, st.b, seitenZiel(st), function (ab) {   // FRUEHER DA (0.8.0)
@@ -726,6 +766,7 @@ var A_R_NEU = 20, A_R_LOESCHEN = 21, A_R_RUECK = 22, A_SOFORT = 23, A_SOFORT_NR 
 var A_ALLE_LOESCHEN = 34, A_FAV_SEITE = 35, A_SOFORT_SPEICHERN = 36;   // 0.8.0
 var A_R_ANKUNFT = 37;                   // 0.11.0
 var A_AKTU = 39;                        // 0.15.0
+var A_HEIM = 40;                        // 0.16.0: Heimathaltestelle setzen (Seite) bzw. löschen (-1)
 var BLOCK = 10;        // muss zu L_TEXT[10] in package.json passen
 var MAXL = 300;        // muss zu MAXL in main.c passen
 var VTXT = 64;         // Vorschlag FRUEHER DA, beide Zeilen (Puffer auf der Uhr, 0.12.0)
@@ -1192,6 +1233,7 @@ function menueAktion2(aktion, wahl, p, det) {
     if (rubrik() === 1 && routen().length) routeLaden(aktiveRoute());
     return;
   }
+  if (aktion === A_HEIM) return heimWaehlen(wahl);   // Heimathaltestelle (0.16.0)
   if (aktion === A_AKTU) {               // Startseite, Aktualisieren (0.15.0): an der Uhr gewählt, dort schon wirksam
     aktuMerken(wahl);
     console.log('Menü: Startseite ' + startseite() + ', regelmäßig ' + regel() + ', nach Abfahrt ' + nachAbfahrt() + ', ohne Taste ' + ohneTaste());
@@ -1395,7 +1437,7 @@ function fahrtZeile(rub, x, o) {
   }
   var plan = x.t - (x.d === AUSFALL ? 0 : x.d) * 60, stadt = L.stadtVon(o.a.name);
   var rest = x.d === AUSFALL ? T('FAELLT AUS', 'fällt aus') : o.b ? (x.an ? T('AN ', 'an ') + hm(x.an) : '') : nameT(x.z || x.r || '', stadt);
-  return hm(plan) + verzText(x.d) + sep + x.l + (rest ? sep + rest : '');
+  return (!o.b && x.h ? String.fromCharCode(x.h) : '') + hm(plan) + verzText(x.d) + sep + x.l + (rest ? sep + rest : '');   // \x01/\x02: Haus (0.16.0)
 }
 function fahrtenListe(rub, i) {
   if (i < 0) {                          // aus den Details zurück: dieselbe Liste, Auswahl auf der gewählten Fahrt
@@ -2908,6 +2950,7 @@ function seiteOeffnen(standort, standortFehler) {
   var zustand = { strecken: strecken(), standort: standort || seitenOrt, standortFehler: standortFehler, schrift: SCHRIFT.F35,
                   rmvKey: rmvSchluessel(), dbId: localStorage.getItem('dbId') || '', dbKey: localStorage.getItem('dbKey') || '', layout: layout(), invers: invers(), kontrast: kontrast(), umkreis: umkreis(), quelle: quelle(), abfahrt: abfahrt(), dauer: dauer(),
                   startseite: startseite(), regel: regel(), nachAbfahrt: nachAbfahrt(), ohneTaste: ohneTaste(), fahrtlog: protokollLesen(),   // 0.15.0
+                  heim: heim(),                                                                                                   // 0.16.0
                   routen: routen(), favoriten: favoriten(), umstiege: umstiege(), fussweg: fussweg(), umstzeit: umstzeit() };
   var html = SEITE_HTML.replace('/*ZUSTAND*/null', function () { return JSON.stringify(zustand); });
   Pebble.openURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
@@ -2944,6 +2987,7 @@ Pebble.addEventListener('webviewclosed', function (e) {
     if (daten.nachAbfahrt !== undefined) localStorage.setItem('nachAbfahrt', daten.nachAbfahrt ? '1' : '0');
     if (typeof daten.ohneTaste === 'number' && daten.ohneTaste >= -1 && daten.ohneTaste <= 60) localStorage.setItem('ohneTaste', String(Math.round(daten.ohneTaste)));
     if (daten.fahrtlogLoeschen) localStorage.setItem('fahrtlog', '[]');
+    if (daten.heimLoeschen) heimSchreiben(null);      // Heimathaltestelle auf der Seite gelöscht (0.16.0)
     if (QUELLEN.indexOf(daten.quelle) >= 0) localStorage.setItem('quelle', daten.quelle);
     if (daten.abfahrt === 'plan' || daten.abfahrt === 'aktuell') localStorage.setItem('abfahrt', daten.abfahrt);
     if (daten.dauer === 'an' || daten.dauer === 'aus') localStorage.setItem('dauer', daten.dauer);

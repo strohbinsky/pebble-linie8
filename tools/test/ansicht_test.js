@@ -68,7 +68,7 @@ function warte() { return new Promise(function (r) { setTimeout(r, 30); }); }
 (async function () {
 lauscher.ready();
 await warte();
-pruefe(gesendet[0][keys.LAYOUT] === 5, 'Handy: ohne Einstellung LAYOUT = 5 (Papier)');
+pruefe(gesendet[0][keys.LAYOUT] === 7, 'Handy: ohne Einstellung LAYOUT = 7 (Cartoon, Standard seit 0.17.0)');
 gesendet = [];
 await warte();
 lauscher.webviewclosed({ response: encodeURIComponent(JSON.stringify(rueck)) });

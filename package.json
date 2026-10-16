@@ -1,7 +1,7 @@
 {
   "name": "linie8",
   "author": "Seb & Claude",
-  "version": "0.15.0",
+  "version": "0.17.0",
   "keywords": [
     "pebble-app"
   ],
@@ -117,7 +117,11 @@
       "AKTU",
       "HIER_M",
       "K_HT[3]",
-      "K_HN[3]"
+      "K_HN[3]",
+      "AB_H[3]",
+      "HEIM_N",
+      "HEIM_K",
+      "HEIM_S"
     ],
     "resources": {
       "media": [
@@ -132,6 +136,30 @@
           "name": "ROBOTO_BOLD_32",
           "file": "fonts/Ziffern-Roboto-Bold.ttf",
           "characterRegex": "[0-9:'+-]"
+        },
+        {
+          "type": "font",
+          "name": "FREDOKA_12",
+          "file": "fonts/Fredoka-SemiBold.ttf",
+          "characterRegex": "[ -~ -ÿ·→…–‘’‚“”„]"
+        },
+        {
+          "type": "font",
+          "name": "FREDOKA_15",
+          "file": "fonts/Fredoka-SemiBold.ttf",
+          "characterRegex": "[ -~ -ÿ·→…–‘’‚“”„]"
+        },
+        {
+          "type": "font",
+          "name": "FREDOKA_18",
+          "file": "fonts/Fredoka-SemiBold.ttf",
+          "characterRegex": "[ -~ -ÿ·→…–‘’‚“”„]"
+        },
+        {
+          "type": "font",
+          "name": "FREDOKA_BOLD_22",
+          "file": "fonts/Fredoka-Bold.ttf",
+          "characterRegex": "[ -~ -ÿ·→…–‘’‚“”„]"
         }
       ]
     },

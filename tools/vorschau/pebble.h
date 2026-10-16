@@ -38,6 +38,7 @@ enum { MESSAGE_KEY_REQUEST = 1, MESSAGE_KEY_STATUS, MESSAGE_KEY_STAND, MESSAGE_K
        MESSAGE_KEY_K_L, MESSAGE_KEY_K_W = MESSAGE_KEY_K_L + 6, MESSAGE_KEY_K_R = MESSAGE_KEY_K_W + 6, MESSAGE_KEY_K_S = MESSAGE_KEY_K_R + 6,
        MESSAGE_KEY_K_F = MESSAGE_KEY_K_S + 6, MESSAGE_KEY_K_FUSS = MESSAGE_KEY_K_F + 6, MESSAGE_KEY_D_AKT, MESSAGE_KEY_L_INFO, MESSAGE_KEY_L_FRAGE, MESSAGE_KEY_L_SUMMEN, MESSAGE_KEY_H_FAV, MESSAGE_KEY_R_FAV, MESSAGE_KEY_S_FAV, MESSAGE_KEY_D_STAND, MESSAGE_KEY_K_STAND, MESSAGE_KEY_V_TEXT,
        MESSAGE_KEY_NEU, MESSAGE_KEY_AKTU, MESSAGE_KEY_HIER_M, MESSAGE_KEY_K_HT, MESSAGE_KEY_K_HN = MESSAGE_KEY_K_HT + 3,   // 0.15.0
+       MESSAGE_KEY_AB_H = MESSAGE_KEY_K_HN + 3, MESSAGE_KEY_HEIM_N = MESSAGE_KEY_AB_H + 3, MESSAGE_KEY_HEIM_K, MESSAGE_KEY_HEIM_S,   // 0.16.0
       
        MESSAGE_KEY_R_NAME = 300, MESSAGE_KEY_R_KLAR = 310, MESSAGE_KEY_R_VON = 320, MESSAGE_KEY_R_VONK = 330,
        MESSAGE_KEY_R_LOS = 340, MESSAGE_KEY_R_AN = 350, MESSAGE_KEY_R_UM = 360, MESSAGE_KEY_R_DEL = 370,
@@ -66,6 +67,10 @@ static inline GFont fonts_get_system_font(const char *k) { return NULL; }
 static inline void *resource_get_handle(int id) { return NULL; }
 static inline GFont fonts_load_custom_font(void *h) { return NULL; }
 #define RESOURCE_ID_ROBOTO_BOLD_32 1
+#define RESOURCE_ID_FREDOKA_12 2       // Cartoon (0.16.0); der Nachbau zeichnet keine Schrift
+#define RESOURCE_ID_FREDOKA_15 3
+#define RESOURCE_ID_FREDOKA_18 4
+#define RESOURCE_ID_FREDOKA_BOLD_22 5
 static inline void graphics_context_set_text_color(GContext *c, GColor k) {}
 static inline void graphics_draw_text(GContext *c, const char *t, GFont f, GRect r, int o, int a, void *x) {}
 static inline GSize graphics_text_layout_get_content_size(const char *t, GFont f, GRect r, int o, int a) { return (GSize){ (int16_t)(strlen(t) * 9), 18 }; }
@@ -85,6 +90,23 @@ static inline void graphics_context_set_stroke_color(GContext *c, GColor k) { s_
 static inline void px(int x, int y, GColor k) { if (x >= 0 && y >= 0 && x < 200 && y < 228) { FB[y][x][0] = k.r; FB[y][x][1] = k.g; FB[y][x][2] = k.b; } }
 static inline void graphics_fill_rect(GContext *c, GRect r, int rad, int m) { for (int y = 0; y < r.size.h; y++) for (int x = 0; x < r.size.w; x++) px(r.origin.x + x, r.origin.y + y, s_fill); }
 static inline void graphics_draw_pixel(GContext *c, GPoint p) { px(p.x, p.y, s_stroke); }
+static inline void graphics_draw_rect(GContext *c, GRect r) {   // 0.16.0: Umriss (Haus, Fenster)
+  for (int x = 0; x < r.size.w; x++) { px(r.origin.x + x, r.origin.y, s_stroke); px(r.origin.x + x, r.origin.y + r.size.h - 1, s_stroke); }
+  for (int y = 0; y < r.size.h; y++) { px(r.origin.x, r.origin.y + y, s_stroke); px(r.origin.x + r.size.w - 1, r.origin.y + y, s_stroke); }
+}
+typedef struct { uint32_t num_points; GPoint *points; int32_t rotation; GPoint offset; } GPath;   // 0.16.0: Anhänger
+#define GPointZero ((GPoint){ 0, 0 })
+static inline void gpath_draw_filled(GContext *c, GPath *g) {   // Vieleck füllen (Zeilenweise, gerade-ungerade)
+  for (int y = 0; y < 228; y++) for (int x = 0; x < 200; x++) {
+    bool in = false;
+    for (uint32_t i = 0, j = g->num_points - 1; i < g->num_points; j = i++) {
+      const GPoint a = g->points[i], b = g->points[j];
+      if ((a.y > y) != (b.y > y) && x < (b.x - a.x) * (y - a.y) / (double)(b.y - a.y) + a.x) in = !in;
+    }
+    if (in) px(x, y, s_fill);
+  }
+}
+static inline void gpath_draw_outline(GContext *c, GPath *g) {}
 static inline void graphics_fill_circle(GContext *c, GPoint p, int r) {
   for (int y = -r; y <= r; y++) for (int x = -r; x <= r; x++) if (x * x + y * y <= r * r) px(p.x + x, p.y + y, s_fill);
 }
