@@ -8,7 +8,7 @@ RMV und der DB. Das Handy kann in der Tasche bleiben.
 Angefangen hat die App als Anzeige für die Buslinie 8 in Wiesbaden. Fahrpläne kommen heute deutschlandweit über
 Transitous, Echtzeit im Rhein-Main-Gebiet vom RMV und für Züge bundesweit von der DB.
 
-> **Beta, Version 0.17.0.** Geprüft mit Tests gegen Live-Daten und im Emulator. Der Alltagstest auf der Uhr läuft
+> **Beta, Version 0.17.1.** Geprüft mit Tests gegen Live-Daten und im Emulator. Der Alltagstest auf der Uhr läuft
 > noch.
 
 ![Ansichten](bilder/ansichten-0170.png)
@@ -58,6 +58,8 @@ Transitous, Echtzeit im Rhein-Main-Gebiet vom RMV und für Züge bundesweit von 
   durchgestrichen
 - **In der Fahrt**: der Ausstieg groß, die Minuten auf einer Tafel. Ab 5 Minuten fährt das Fahrzeug auf den Ausstieg
   zu, die letzten Halte stehen an der Straße. In der letzten Minute steht `JETZT RAUS!` da und die Uhr vibriert
+- **Rosa** sind alle Abfahrten, die später an deiner Heimathaltestelle halten. Die Auswahl (Select öffnet ihre
+  Details) trägt einen dunklen Rahmen
 - Neu gezeichnet wird alle 5 Sekunden
 
 ## Papier und Phosphor
